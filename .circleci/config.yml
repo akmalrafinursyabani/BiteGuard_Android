@@ -27,8 +27,9 @@ commands:
       - run:
           name: Setup Script Permissions & Release Credentials
           command: |
+            chmod +x ./gradlew 2>/dev/null || true
             if [ -d "./scripts" ]; then
-              chmod +x ./scripts/*.sh 2>/dev/null || true
+              find ./scripts -name "*.sh" -type f -exec chmod +x {} + 2>/dev/null || true
             fi
             if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ]; then
               echo "Decoding production release keystore from CI secrets..."
