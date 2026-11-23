@@ -26,10 +26,10 @@ jobs:
       resource-class: medium
       tag: default
     environment:
-      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
-      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
-      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
-      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+      COMPONENT_NAME: "<< pipeline.parameters.deploy_component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy_environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy_namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy_target_version >>"
     steps:
       - checkout
       - attach_workspace:
@@ -77,10 +77,10 @@ jobs:
       resource-class: medium
       tag: default
     environment:
-      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
-      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
-      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
-      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+      COMPONENT_NAME: "<< pipeline.parameters.deploy_component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy_environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy_namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy_target_version >>"
     steps:
       - checkout
       - attach_workspace:
@@ -128,10 +128,10 @@ jobs:
       resource-class: large
       tag: default
     environment:
-      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
-      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
-      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
-      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+      COMPONENT_NAME: "<< pipeline.parameters.deploy_component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy_environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy_namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy_target_version >>"
     steps:
       - checkout
       - setup-environment
@@ -183,9 +183,13 @@ workflows:
                 - circleci-project-setup
                 - /release\/.*/
       - cancel-deploy-internal:
-          requires:
-            - deploy-internal
-          when: on_fail
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
       - deploy-production:
           filters:
             branches:
@@ -195,9 +199,13 @@ workflows:
                 - circleci-project-setup
                 - /release\/.*/
       - cancel-deploy-production:
-          requires:
-            - deploy-production
-          when: on_fail
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
       - rollback-production:
           filters:
             branches:
@@ -207,6 +215,10 @@ workflows:
                 - circleci-project-setup
                 - /release\/.*/
       - cancel-rollback-production:
-          requires:
-            - rollback-production
-          when: on_fail
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
