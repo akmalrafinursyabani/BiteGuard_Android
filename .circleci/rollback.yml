@@ -1,0 +1,175 @@
+version: 2.1
+
+orbs:
+  android: circleci/android@1.0.3
+
+commands:
+  setup-environment:
+    description: "Configures bash script permissions and release keystore credentials if provided"
+    steps:
+      - run:
+          name: Setup Script Permissions & Release Credentials
+          command: |
+            chmod +x ./scripts/*.sh
+            if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ]; then
+              echo "Decoding production release keystore from CI secrets..."
+              echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+              echo "export RELEASE_KEYSTORE_PATH=app/release.keystore" >> "$BASH_ENV"
+            else
+              echo "No RELEASE_KEYSTORE_BASE64 secret found; using CI release fallback."
+            fi
+
+jobs:
+  deploy-internal-rollback:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    environment:
+      COMPONENT_NAME: "<< pipeline.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Plan rollback
+          command: |
+            circleci run release plan deploy-internal-rollback \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --namespace=${NAMESPACE} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION} \
+              --rollback
+      - run:
+          name: Perform rollback to internal track
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env internal \
+              --status DEPLOYED \
+              --reason "Rollback to version ${TARGET_VERSION}"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-internal-rollback
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update deploy-internal-rollback --status=FAILED
+          when: on_fail
+
+  cancel-deploy-internal-rollback:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-internal-rollback \
+              --status=CANCELED
+
+  deploy-production-rollback:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    environment:
+      COMPONENT_NAME: "<< pipeline.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Plan rollback
+          command: |
+            circleci run release plan deploy-production-rollback \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --namespace=${NAMESPACE} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION} \
+              --rollback
+      - run:
+          name: Perform rollback
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env production \
+              --status ROLLED_BACK \
+              --reason "Emergency rollback to version ${TARGET_VERSION}"
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update deploy-production-rollback --status=FAILED
+          when: on_fail
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-production-rollback
+
+  cancel-deploy-production-rollback:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-production-rollback \
+              --status=CANCELED
+
+  deploy-internal-rollback-release:
+    type: release
+    plan_name: deploy-internal-rollback
+    validation:
+      enabled: true
+
+  deploy-production-rollback-release:
+    type: release
+    plan_name: deploy-production-rollback
+    validation:
+      enabled: true
+
+workflows:
+  rollback:
+    jobs:
+      - deploy-internal-rollback:
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - deploy-internal-rollback-release:
+          requires:
+            - deploy-internal-rollback
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - cancel-deploy-internal-rollback:
+          when: on_fail
+      - deploy-production-rollback:
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - deploy-production-rollback-release:
+          requires:
+            - deploy-production-rollback
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - cancel-deploy-production-rollback:
+          when: on_fail
