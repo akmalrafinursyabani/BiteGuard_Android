@@ -45,7 +45,7 @@ jobs:
               --target-version=${TARGET_VERSION} \
               --rollback
       - run:
-          name: Perform rollback
+          name: Perform rollback to internal track
           command: |
             ./scripts/deploy_marker.sh \
               --env internal \
@@ -53,7 +53,7 @@ jobs:
               --reason "Rollback to version ${TARGET_VERSION}"
       - store_artifacts:
           path: build/deploy-markers
-          destination: deploy-markers-internal
+          destination: deploy-markers-internal-rollback
       - run:
           name: Update deployment status to failed
           command: circleci run release update deploy-internal-rollback --status=FAILED
@@ -100,13 +100,13 @@ jobs:
               --env production \
               --status ROLLED_BACK \
               --reason "Emergency rollback to version ${TARGET_VERSION}"
-      - store_artifacts:
-          path: build/deploy-markers
-          destination: deploy-markers-production-rollback
       - run:
           name: Update deployment status to failed
           command: circleci run release update deploy-production-rollback --status=FAILED
           when: on_fail
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-production-rollback
 
   cancel-deploy-production-rollback:
     docker:
@@ -118,15 +118,15 @@ jobs:
             circleci run release update deploy-production-rollback \
               --status=CANCELED
 
-  deploy-production-rollback-release:
-    type: release
-    plan_name: deploy-production-rollback
-    validation:
-      enabled: true
-
   deploy-internal-rollback-release:
     type: release
     plan_name: deploy-internal-rollback
+    validation:
+      enabled: true
+
+  deploy-production-rollback-release:
+    type: release
+    plan_name: deploy-production-rollback
     validation:
       enabled: true
 
@@ -152,8 +152,7 @@ workflows:
                 - circleci-project-setup
                 - /release\/.*/
       - cancel-deploy-internal-rollback:
-          requires:
-            - deploy-internal-rollback
+          when: on_fail
       - deploy-production-rollback:
           filters:
             branches:
@@ -173,5 +172,4 @@ workflows:
                 - circleci-project-setup
                 - /release\/.*/
       - cancel-deploy-production-rollback:
-          requires:
-            - deploy-production-rollback
+          when: on_fail
