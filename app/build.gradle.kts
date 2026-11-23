@@ -19,29 +19,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val keystorePath = System.getenv("RELEASE_KEYSTORE_PATH")
+    val keystoreFile = if (!keystorePath.isNullOrBlank()) file(keystorePath) else file("release.keystore")
+    val hasReleaseKeystore = keystoreFile.exists()
+
     signingConfigs {
-        create("release") {
-            val keystorePath = System.getenv("RELEASE_KEYSTORE_PATH")
-            val keystoreFile = if (!keystorePath.isNullOrBlank()) file(keystorePath) else file("release.keystore")
-            if (keystoreFile.exists()) {
+        if (hasReleaseKeystore) {
+            create("release") {
                 storeFile = keystoreFile
                 storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: ""
                 keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: ""
                 keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: ""
-            } else {
-                // Fallback to debug keystore for CI verification/test builds when production key is not mounted
-                val debugConfig = getByName("debug")
-                storeFile = debugConfig.storeFile
-                storePassword = debugConfig.storePassword
-                keyAlias = debugConfig.keyAlias
-                keyPassword = debugConfig.keyPassword
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
