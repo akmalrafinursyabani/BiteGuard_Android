@@ -27,7 +27,7 @@ commands:
       - run:
           name: Setup Script Permissions & Release Credentials
           command: |
-            chmod +x ./scripts/*.sh
+            find ./scripts -name "*.sh" -type f -exec chmod +x {} +
             if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ]; then
               echo "Decoding production release keystore from CI secrets..."
               echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > app/release.keystore
