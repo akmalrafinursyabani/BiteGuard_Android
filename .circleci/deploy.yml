@@ -1,0 +1,212 @@
+version: 2.1
+
+orbs:
+  android: circleci/android@1.0.3
+
+commands:
+  setup-environment:
+    description: "Configures bash script permissions and release keystore credentials if provided"
+    steps:
+      - run:
+          name: Setup Script Permissions & Release Credentials
+          command: |
+            chmod +x ./scripts/*.sh
+            if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ]; then
+              echo "Decoding production release keystore from CI secrets..."
+              echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+              echo "export RELEASE_KEYSTORE_PATH=app/release.keystore" >> "$BASH_ENV"
+            else
+              echo "No RELEASE_KEYSTORE_BASE64 secret found; using CI release fallback."
+            fi
+
+jobs:
+  deploy-internal:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    environment:
+      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Plan release
+          command: |
+            circleci run release plan \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --namespace=${NAMESPACE} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION}
+      - run:
+          name: Perform deployment
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env internal \
+              --status DEPLOYED \
+              --reason "Automated CI/CD build deployment to Internal Testing Track"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-internal
+      - store_artifacts:
+          path: app/build/outputs/bundle/release/app-release.aab
+          destination: release-bundle-internal
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update --status=FAILED
+          when: on_fail
+
+  cancel-deploy-internal:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-internal \
+              --status=CANCELED
+
+  deploy-production:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    environment:
+      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Plan release
+          command: |
+            circleci run release plan \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --namespace=${NAMESPACE} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION}
+      - run:
+          name: Perform deployment
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env production \
+              --status DEPLOYED \
+              --reason "Production release promoted following manual signoff and safety validation"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-production
+      - store_artifacts:
+          path: app/build/outputs/bundle/release/app-release.aab
+          destination: production-release-bundle
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update --status=FAILED
+          when: on_fail
+
+  cancel-deploy-production:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-production \
+              --status=CANCELED
+
+  rollback-production:
+    executor:
+      name: android/android-machine
+      resource-class: large
+      tag: default
+    environment:
+      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Plan release
+          command: |
+            circleci run release plan \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --namespace=${NAMESPACE} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION}
+      - run:
+          name: Execute Emergency Rollback
+          command: |
+            ./scripts/rollback_release.sh \
+              --env production \
+              --reason "Emergency safety rollback initiated via CircleCI" \
+              --tag "${TARGET_VERSION}"
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update --status=FAILED
+          when: on_fail
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: rollback-deploy-markers
+      - store_artifacts:
+          path: app/build/outputs/bundle/release
+          destination: rollback-artifacts
+
+  cancel-rollback-production:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update rollback-production \
+              --status=CANCELED
+
+workflows:
+  deploy:
+    jobs:
+      - deploy-internal:
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - cancel-deploy-internal:
+          requires:
+            - deploy-internal
+          when: on_fail
+      - deploy-production:
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - cancel-deploy-production:
+          requires:
+            - deploy-production
+          when: on_fail
+      - rollback-production:
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - cancel-rollback-production:
+          requires:
+            - rollback-production
+          when: on_fail
