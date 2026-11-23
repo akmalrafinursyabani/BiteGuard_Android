@@ -10,12 +10,15 @@ import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.SafetyLevel
 import com.biteguard.core.model.UserDietaryProfile
 import com.biteguard.core.model.UserFeedback
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ProfileAndHistoryUiState(
     val profile: UserDietaryProfile = UserDietaryProfile(),
@@ -28,6 +31,7 @@ data class ProfileAndHistoryUiState(
 )
 
 sealed interface ProfileIntent {
+    data class UpdateUserName(val name: String) : ProfileIntent
     data class ToggleAllergen(val allergen: Allergen) : ProfileIntent
     data class ToggleHealthGoal(val goal: HealthGoal) : ProfileIntent
     data class SetHighContrast(val enabled: Boolean) : ProfileIntent
@@ -41,7 +45,8 @@ sealed interface ProfileIntent {
 
 class ProfileViewModel(
     private val profileRepository: ProfileRepository,
-    private val auditRepository: AuditRepository
+    private val auditRepository: AuditRepository,
+    private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     private val searchQueryFlow = MutableStateFlow("")
@@ -56,17 +61,23 @@ class ProfileViewModel(
         safetyFilterFlow,
         combine(selectedVerdictIdFlow, showClearConfirmFlow) { id, showClear -> id to showClear }
     ) { profile, history, query, safetyFilter, (selectedId, showClear) ->
-        val filtered = history.filter { verdict ->
-            val matchesLevel = safetyFilter == null || verdict.safetyLevel == safetyFilter
-            val matchesQuery = query.isBlank() ||
-                verdict.productName.contains(query, ignoreCase = true) ||
-                verdict.summary.contains(query, ignoreCase = true) ||
-                verdict.rawExtractedText.contains(query, ignoreCase = true) ||
-                verdict.flaggedIngredients.any {
-                    it.name.contains(query, ignoreCase = true) ||
-                        it.riskReason.contains(query, ignoreCase = true)
+        val filtered = if (query.isBlank() && safetyFilter == null) {
+            history
+        } else {
+            withContext(defaultDispatcher) {
+                history.filter { verdict ->
+                    val matchesLevel = safetyFilter == null || verdict.safetyLevel == safetyFilter
+                    val matchesQuery = query.isBlank() ||
+                        verdict.productName.contains(query, ignoreCase = true) ||
+                        verdict.summary.contains(query, ignoreCase = true) ||
+                        verdict.rawExtractedText.contains(query, ignoreCase = true) ||
+                        verdict.flaggedIngredients.any {
+                            it.name.contains(query, ignoreCase = true) ||
+                                it.riskReason.contains(query, ignoreCase = true)
+                        }
+                    matchesLevel && matchesQuery
                 }
-            matchesLevel && matchesQuery
+            }
         }
 
         ProfileAndHistoryUiState(
@@ -86,6 +97,9 @@ class ProfileViewModel(
 
     fun onIntent(intent: ProfileIntent) {
         when (intent) {
+            is ProfileIntent.UpdateUserName -> viewModelScope.launch {
+                profileRepository.setUserName(intent.name)
+            }
             is ProfileIntent.ToggleAllergen -> viewModelScope.launch {
                 profileRepository.toggleAllergen(intent.allergen)
             }

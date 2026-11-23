@@ -1,18 +1,34 @@
 package com.biteguard.core.data.ai
 
 import android.graphics.Bitmap
+import android.util.Base64
+import android.util.Log
 import com.biteguard.core.data.BuildConfig
 import com.biteguard.core.model.FlaggedIngredient
 import com.biteguard.core.model.SafetyLevel
 import com.biteguard.core.model.Severity
 import com.biteguard.core.model.UserDietaryProfile
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import com.google.ai.client.generativeai.type.generationConfig
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
+import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 
 /**
  * Abstraction over Gemini multimodal streaming API (FR-03) so repositories can be unit-tested
@@ -27,9 +43,26 @@ interface AiStreamDataSource {
     ): Flow<String>
 }
 
+/**
+ * Direct SSE (`streamGenerateContent?alt=sse`) client for `generativelanguage.googleapis.com/v1beta`.
+ *
+ * Why direct REST SSE instead of the archived `com.google.ai.client.generativeai:0.9.0` wrapper:
+ * 1. Native support for Google AI Studio's new `AQ.` Authentication Keys as well as legacy `AIza` keys.
+ * 2. Resilient to `gemini-2.5-flash` thinking parts (`"thought": true`) and new `usageMetadata` fields
+ *    that crash the archived 0.9.0 SDK with `SerializationException` / `MissingFieldException`.
+ * 3. Transparently surfaces real HTTP error codes and messages from the Gemini endpoint in Logcat.
+ */
 class GeminiStreamDataSource(
-    private val apiKeyProvider: () -> String = { BuildConfig.GEMINI_API_KEY }
+    private val apiKeyProvider: () -> String = { BuildConfig.GEMINI_API_KEY },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val modelName: String = DEFAULT_MODEL_NAME
 ) : AiStreamDataSource {
+
+    private val lenientJson = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
 
     override val isApiKeyConfigured: Boolean
         get() = apiKeyProvider().isNotBlank()
@@ -40,35 +73,212 @@ class GeminiStreamDataSource(
         frameBitmap: Bitmap?
     ): Flow<String> = flow {
         val key = apiKeyProvider().trim()
+        val maskedPrefix = if (key.length >= 6) "${key.take(6)}..." else "(empty)"
+        debugLog("Starting streamLabelAudit | model=$modelName | keyPrefix=$maskedPrefix (len=${key.length}) | textLen=${rawExtractedText.length} | hasBitmap=${frameBitmap != null}")
+
         if (key.isBlank()) {
+            debugError("GEMINI_API_KEY is blank in BuildConfig / local.properties!")
             throw MissingApiKeyException("GEMINI_API_KEY is not configured in local.properties")
         }
 
-        val model = GenerativeModel(
-            modelName = "gemini-2.5-flash",
-            apiKey = key,
-            generationConfig = generationConfig {
-                temperature = 0.1f
-            }
-        )
-
         val prompt = buildAuditPrompt(rawExtractedText, profile)
-        val inputContent = content {
-            if (frameBitmap != null) {
-                image(frameBitmap)
+        val requestBodyJson = buildRequestJson(prompt, frameBitmap)
+
+        val candidateModels = listOf(modelName) + FALLBACK_MODEL_NAMES.filter { it != modelName }
+        var lastException: Throwable? = null
+
+        for ((attemptIdx, activeModel) in candidateModels.withIndex()) {
+            val endpointUrl = "https://generativelanguage.googleapis.com/v1beta/models/$activeModel:streamGenerateContent?alt=sse"
+            val connection = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                doInput = true
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Accept", "text/event-stream")
+                setRequestProperty("x-goog-api-key", key)
             }
-            text(prompt)
+
+            var chunkIndex = 0
+            try {
+                connection.outputStream.use { os ->
+                    os.write(requestBodyJson.toByteArray(StandardCharsets.UTF_8))
+                    os.flush()
+                }
+
+                val responseCode = connection.responseCode
+                debugLog("Gemini HTTP responseCode=$responseCode for model=$activeModel (attempt=${attemptIdx + 1}/${candidateModels.size})")
+
+                if (responseCode !in 200..299) {
+                    val errorBody = runCatching {
+                        (connection.errorStream ?: connection.inputStream)?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }
+                    }.getOrNull().orEmpty()
+
+                    debugError("Gemini HTTP $responseCode error payload for model=$activeModel: $errorBody")
+                    if (responseCode == 400 && (errorBody.contains("API_KEY_INVALID", ignoreCase = true) || errorBody.contains("API key not valid", ignoreCase = true))) {
+                        throw MissingApiKeyException("Google AI Studio rejected GEMINI_API_KEY (HTTP 400 API_KEY_INVALID): $errorBody")
+                    }
+                    if (responseCode == 401 || responseCode == 403) {
+                        throw MissingApiKeyException("Google AI Studio authentication error (HTTP $responseCode): $errorBody")
+                    }
+                    if (responseCode == 404 && attemptIdx < candidateModels.lastIndex) {
+                        debugLog("Model '$activeModel' returned 404 NOT_FOUND; falling back to '${candidateModels[attemptIdx + 1]}'")
+                        lastException = IllegalStateException("Gemini API HTTP 404 on $activeModel: ${errorBody.take(280)}")
+                        continue
+                    }
+                    throw IllegalStateException("Gemini API HTTP $responseCode: ${errorBody.take(280)}")
+                }
+
+                BufferedReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val trimmed = line?.trim() ?: continue
+                        if (!trimmed.startsWith("data:")) continue
+                        val payload = trimmed.removePrefix("data:").trim()
+                        if (payload.isEmpty() || payload == "[DONE]") continue
+
+                        val extractedPiece = extractTextFromSseChunk(payload)
+                        if (!extractedPiece.isNullOrEmpty()) {
+                            chunkIndex++
+                            debugLog("Received SSE stream chunk #$chunkIndex from $activeModel (${extractedPiece.length} chars)")
+                            emit(extractedPiece)
+                        }
+                    }
+                }
+                debugLog("Completed SSE generateContentStream successfully with model=$activeModel ($chunkIndex total chunks)")
+                lastException = null
+                break
+            } catch (t: Throwable) {
+                debugError("Gemini stream failed on model=$activeModel after $chunkIndex chunk(s): [${t::class.java.simpleName}] ${t.message}", t)
+                if (chunkIndex == 0 && t is java.net.SocketTimeoutException && attemptIdx < candidateModels.lastIndex) {
+                    debugLog("SocketTimeoutException on '$activeModel' before any chunk arrived; trying fallback model '${candidateModels[attemptIdx + 1]}'")
+                    lastException = t
+                    continue
+                }
+                throw t
+            } finally {
+                runCatching { connection.disconnect() }
+            }
         }
 
-        model.generateContentStream(inputContent).collect { chunk ->
-            val piece = chunk.text
-            if (!piece.isNullOrEmpty()) {
-                emit(piece)
-            }
+        if (lastException != null) {
+            throw lastException
         }
+    }.flowOn(ioDispatcher)
+
+    private fun buildRequestJson(prompt: String, frameBitmap: Bitmap?): String {
+        val partsArray = buildJsonArray {
+            if (frameBitmap != null) {
+                val base64Jpeg = encodeBitmapToBase64Jpeg(frameBitmap)
+                if (base64Jpeg != null) {
+                    add(
+                        buildJsonObject {
+                            put(
+                                "inline_data",
+                                buildJsonObject {
+                                    put("mime_type", "image/jpeg")
+                                    put("data", base64Jpeg)
+                                }
+                            )
+                        }
+                    )
+                }
+            }
+            add(
+                buildJsonObject {
+                    put("text", prompt)
+                }
+            )
+        }
+
+        val root = buildJsonObject {
+            put(
+                "contents",
+                buildJsonArray {
+                    add(
+                        buildJsonObject {
+                            put("role", "user")
+                            put("parts", partsArray)
+                        }
+                    )
+                }
+            )
+            put(
+                "generationConfig",
+                buildJsonObject {
+                    put("temperature", 0.1)
+                }
+            )
+        }
+        return root.toString()
     }
 
+    /**
+     * Parses a single SSE JSON event from `streamGenerateContent?alt=sse`, skipping internal
+     * `"thought": true` reasoning parts so only user-facing verdict text is emitted.
+     */
+    private fun extractTextFromSseChunk(jsonPayload: String): String? = runCatching {
+        val rootObj = lenientJson.parseToJsonElement(jsonPayload).jsonObject
+        val candidates = rootObj["candidates"] as? JsonArray ?: return@runCatching null
+        val firstCandidate = candidates.firstOrNull() as? JsonObject ?: return@runCatching null
+        val contentObj = firstCandidate["content"] as? JsonObject ?: return@runCatching null
+        val parts = contentObj["parts"] as? JsonArray ?: return@runCatching null
+
+        val sb = StringBuilder()
+        for (partElement in parts) {
+            val partObj = partElement as? JsonObject ?: continue
+            val isThought = (partObj["thought"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() == true
+            if (isThought) continue
+            val textPiece = (partObj["text"] as? JsonPrimitive)?.contentOrNull
+            if (!textPiece.isNullOrEmpty()) {
+                sb.append(textPiece)
+            }
+        }
+        sb.toString().takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun encodeBitmapToBase64Jpeg(bitmap: Bitmap): String? = runCatching {
+        val maxDim = 768
+        val scale = (maxDim.toFloat() / maxOf(bitmap.width, bitmap.height, 1)).coerceAtMost(1f)
+        val targetBitmap = if (scale < 1f) {
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            bitmap
+        }
+        ByteArrayOutputStream().use { bos ->
+            targetBitmap.compress(Bitmap.CompressFormat.JPEG, 72, bos)
+            Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+        }
+    }.getOrNull()
+
     companion object {
+        private const val TAG = "BiteGuardAI_Gemini"
+        const val DEFAULT_MODEL_NAME = "gemini-3.8-flash"
+        val FALLBACK_MODEL_NAMES = listOf(
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash"
+        )
+
+        private fun debugLog(message: String) {
+            if (BuildConfig.DEBUG) {
+                runCatching { Log.d(TAG, message) }
+            }
+        }
+
+        private fun debugError(message: String, throwable: Throwable? = null) {
+            if (BuildConfig.DEBUG) {
+                runCatching {
+                    if (throwable != null) Log.e(TAG, message, throwable) else Log.e(TAG, message)
+                }
+            }
+        }
         fun buildAuditPrompt(
             rawExtractedText: String,
             profile: UserDietaryProfile

@@ -73,6 +73,10 @@ class ProfileViewModelTest {
             viewModel.onIntent(ProfileIntent.SetHighContrast(true))
             val afterContrast = awaitItem()
             assertTrue(afterContrast.profile.highContrastMode)
+
+            viewModel.onIntent(ProfileIntent.UpdateUserName("Akmal"))
+            val afterName = awaitItem()
+            assertEquals("Akmal", afterName.profile.userName)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -102,7 +106,7 @@ class ProfileViewModelTest {
             auditLogDataSource = auditLog
         )
 
-        val viewModel = ProfileViewModel(profileRepo, auditRepo)
+        val viewModel = ProfileViewModel(profileRepo, auditRepo, testDispatcher)
 
         viewModel.uiState.test {
             val all = awaitItem()

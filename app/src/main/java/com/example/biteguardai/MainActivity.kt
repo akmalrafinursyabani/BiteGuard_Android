@@ -4,18 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
@@ -23,9 +19,6 @@ import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,11 +53,11 @@ import com.biteguard.core.model.UserDietaryProfile
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.SafetyVerdictBanner
 import com.biteguard.feature.profile.DietaryProfileScreen
-import com.biteguard.feature.profile.ProfileIntent
 import com.biteguard.feature.profile.ProfileViewModel
 import com.biteguard.feature.profile.ScanHistoryScreen
 import com.biteguard.feature.scanner.ScannerScreen
 import com.biteguard.feature.scanner.ScannerViewModel
+import com.example.biteguardai.ui.onboarding.BiteGuardOnboardingFlow
 import com.example.biteguardai.ui.theme.BiteGuardAITheme
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
 import kotlinx.coroutines.launch
@@ -89,12 +82,19 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val initialOnboardingState = androidx.compose.runtime.remember {
+                profileRepository.isOnboardingCompletedSync()
+            }
+            var sessionOnboardingCompleted by rememberSaveable {
+                mutableStateOf(initialOnboardingState)
+            }
             val profile by profileRepository.userProfileFlow.collectAsStateWithLifecycle(
                 initialValue = UserDietaryProfile()
             )
-            val onboardingAccepted by profileRepository.onboardingAcceptedFlow.collectAsStateWithLifecycle(
-                initialValue = true
+            val onboardingAcceptedFromFlow by profileRepository.onboardingAcceptedFlow.collectAsStateWithLifecycle(
+                initialValue = initialOnboardingState
             )
+            val isOnboarded = sessionOnboardingCompleted || onboardingAcceptedFromFlow || profile.userName.isNotBlank()
             val scope = rememberCoroutineScope()
 
             BiteGuardAITheme(
@@ -102,15 +102,20 @@ class MainActivity : ComponentActivity() {
             ) {
                 BiteGuardAppShell(
                     profile = profile,
-                    onboardingAccepted = onboardingAccepted,
+                    onboardingAccepted = isOnboarded,
                     onToggleHighContrast = {
                         scope.launch {
                             profileRepository.setHighContrastMode(!profile.highContrastMode)
                         }
                     },
-                    onAcceptOnboardingDisclaimer = {
+                    onCompleteOnboarding = { userName, allergens, goals ->
+                        sessionOnboardingCompleted = true
                         scope.launch {
-                            profileRepository.setOnboardingAccepted(true)
+                            profileRepository.completeOnboarding(
+                                userName = userName,
+                                allergens = allergens,
+                                healthGoals = goals
+                            )
                         }
                     }
                 )
@@ -125,7 +130,34 @@ fun BiteGuardAppShell(
     profile: UserDietaryProfile,
     onboardingAccepted: Boolean,
     onToggleHighContrast: () -> Unit,
-    onAcceptOnboardingDisclaimer: () -> Unit
+    onCompleteOnboarding: (String, Set<Allergen>, Set<HealthGoal>) -> Unit
+) {
+    Crossfade(
+        targetState = onboardingAccepted,
+        animationSpec = tween(durationMillis = 360),
+        label = "onboardingToHomeCrossfade"
+    ) { isOnboarded ->
+        if (!isOnboarded) {
+            BiteGuardOnboardingFlow(
+                initialName = profile.userName,
+                initialAllergens = profile.selectedAllergens,
+                initialHealthGoals = profile.healthGoals,
+                onCompleteOnboarding = onCompleteOnboarding
+            )
+        } else {
+            BiteGuardMainScaffold(
+                profile = profile,
+                onToggleHighContrast = onToggleHighContrast
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BiteGuardMainScaffold(
+    profile: UserDietaryProfile,
+    onToggleHighContrast: () -> Unit
 ) {
     var currentTab by rememberSaveable { mutableStateOf(BiteGuardDestination.SCANNER) }
     val semanticColors = LocalBiteGuardSemanticColors.current
@@ -157,7 +189,11 @@ fun BiteGuardAppShell(
                                 fontWeight = FontWeight.ExtraBold
                             )
                             Text(
-                                text = "Smart Food & Allergen Auditor",
+                                text = if (profile.userName.isNotBlank()) {
+                                    "Guarding ${profile.userName} • Smart Food Auditor"
+                                } else {
+                                    "Smart Food & Allergen Auditor"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -252,51 +288,6 @@ fun BiteGuardAppShell(
             }
         }
     }
-
-    // NFR-NT4: Onboarding Legal & Medical Disclaimer Dialog
-    if (!onboardingAccepted) {
-        AlertDialog(
-            onDismissRequest = {},
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.HealthAndSafety,
-                    contentDescription = null,
-                    tint = semanticColors.safe.color,
-                    modifier = Modifier.size(36.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = "Welcome to BiteGuard AI",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "Real-time edge OCR and multimodal AI ingredient auditing tailored to your allergies and health goals.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    MedicalDisclaimerBanner()
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = onAcceptOnboardingDisclaimer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = semanticColors.safe.color,
-                        contentColor = semanticColors.safe.onColor
-                    )
-                ) {
-                    Text("I Understand & Accept", fontWeight = FontWeight.ExtraBold)
-                }
-            }
-        )
-    }
 }
 
 @Preview(showBackground = true)
@@ -314,3 +305,4 @@ fun BiteGuardPreview() {
         }
     }
 }
+

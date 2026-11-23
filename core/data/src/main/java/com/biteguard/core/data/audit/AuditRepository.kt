@@ -1,6 +1,8 @@
 package com.biteguard.core.data.audit
 
 import android.graphics.Bitmap
+import android.util.Log
+import com.biteguard.core.data.BuildConfig
 import com.biteguard.core.data.ai.AiStreamDataSource
 import com.biteguard.core.data.ai.DefensiveVerdictParser
 import com.biteguard.core.data.ai.MissingApiKeyException
@@ -16,12 +18,15 @@ import com.biteguard.core.model.TelemetryEvent
 import com.biteguard.core.model.UserDietaryProfile
 import com.biteguard.core.model.UserFeedback
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
 import java.time.Instant
@@ -56,7 +61,8 @@ interface AuditRepository {
 class DefaultAuditRepository(
     private val aiStreamDataSource: AiStreamDataSource,
     private val auditLogDataSource: AuditLogDataSource,
-    private val firstTokenTimeoutMs: Long = 5_000L
+    private val firstTokenTimeoutMs: Long = 15_000L,
+    private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : AuditRepository {
 
     override val scanHistoryFlow: Flow<List<AuditVerdict>> = auditLogDataSource.historyFlow
@@ -69,9 +75,14 @@ class DefaultAuditRepository(
         retryAttempt: Int
     ): Flow<StreamState<AuditVerdict>> = channelFlow {
         val cleanText = rawExtractedText.trim()
-        val thumbnailBytes = frameBitmap?.let { compressThumbnailInMemory(it) }
+        debugLog("performLabelAudit started | retryAttempt=$retryAttempt | textLen=${cleanText.length} | allergens=${profile.selectedAllergens.size} | goals=${profile.healthGoals.size} | hasBitmap=${frameBitmap != null}")
+
+        val thumbnailBytes = frameBitmap?.let {
+            withContext(defaultDispatcher) { compressThumbnailInMemory(it) }
+        }
 
         if (cleanText.isBlank()) {
+            debugWarn("performLabelAudit aborted: cleanText is blank (NO_TEXT_DETECTED)")
             send(
                 StreamState.Error(
                     throwable = IllegalArgumentException("No ingredient text found in scan."),
@@ -110,6 +121,7 @@ class DefaultAuditRepository(
                             }
                         tokenChannel.close()
                     } catch (t: Throwable) {
+                        debugError("Producer stream threw exception: [${t::class.java.simpleName}] ${t.message}", t)
                         tokenChannel.close(t)
                     }
                 }
@@ -120,19 +132,24 @@ class DefaultAuditRepository(
                         tokenChannel.receiveCatching()
                     }
                 } catch (timeout: TimeoutCancellationException) {
+                    debugWarn("First-token timeout (${firstTokenTimeoutMs}ms) exceeded! Cancelling cloud stream and switching to offline fallback.")
                     producerJob.cancel()
                     throw timeout
                 }
 
                 if (firstResult.isFailure || firstResult.isClosed) {
                     val cause = firstResult.exceptionOrNull()
+                    debugError("Stream closed before first token arrived. Cause: [${cause?.javaClass?.simpleName}] ${cause?.message}", cause)
                     producerJob.cancel()
                     throw (cause ?: IllegalStateException("Cloud stream closed before first token"))
                 } else {
                     val firstChunk = firstResult.getOrThrow()
                     firstTokenTimeMs = (System.currentTimeMillis() - startTimeMs).coerceAtLeast(1L)
+                    debugLog("First token received in ${firstTokenTimeMs}ms | firstChunk='${firstChunk.take(60)}'")
                     accumulatedRaw.append(firstChunk)
-                    val (partialLevel, partialSummary) = DefensiveVerdictParser.parseIncremental(accumulatedRaw.toString())
+                    val (partialLevel, partialSummary) = withContext(defaultDispatcher) {
+                        DefensiveVerdictParser.parseIncremental(accumulatedRaw.toString())
+                    }
                     send(
                         StreamState.Streaming(
                             partialVerdict = PartialAuditVerdict(
@@ -147,7 +164,9 @@ class DefaultAuditRepository(
                 // Consume remaining tokens
                 for (chunk in tokenChannel) {
                     accumulatedRaw.append(chunk)
-                    val (partialLevel, partialSummary) = DefensiveVerdictParser.parseIncremental(accumulatedRaw.toString())
+                    val (partialLevel, partialSummary) = withContext(defaultDispatcher) {
+                        DefensiveVerdictParser.parseIncremental(accumulatedRaw.toString())
+                    }
                     send(
                         StreamState.Streaming(
                             partialVerdict = PartialAuditVerdict(
@@ -161,17 +180,22 @@ class DefaultAuditRepository(
             }
 
             val totalDurationMs = (System.currentTimeMillis() - startTimeMs).coerceAtLeast(1L)
-            val parsed = DefensiveVerdictParser.parseFinal(accumulatedRaw.toString())
+            debugLog("Cloud stream finished in ${totalDurationMs}ms | rawPayloadLen=${accumulatedRaw.length}")
 
-            // Cross-verify with local rule engine so critical life-threatening allergens are never missed
-            val localFallback = LocalFallbackAuditEngine.evaluateOffline(
-                rawText = cleanText,
-                profile = profile,
-                snapshotThumbnailBytes = thumbnailBytes,
-                elapsedMs = totalDurationMs
-            )
+            val (parsed, localFallback) = withContext(defaultDispatcher) {
+                val parsedOutput = DefensiveVerdictParser.parseFinal(accumulatedRaw.toString())
+                // Cross-verify with local rule engine so critical life-threatening allergens are never missed
+                val localEval = LocalFallbackAuditEngine.evaluateOffline(
+                    rawText = cleanText,
+                    profile = profile,
+                    snapshotThumbnailBytes = thumbnailBytes,
+                    elapsedMs = totalDurationMs
+                )
+                parsedOutput to localEval
+            }
 
             if (parsed.cleanSummary.isBlank() && parsed.safetyLevel == null) {
+                debugError("Malformed AI stream output! Raw payload was:\n$accumulatedRaw")
                 throw IllegalStateException("Malformed or empty AI stream output")
             }
 
@@ -202,10 +226,14 @@ class DefaultAuditRepository(
                 totalStreamDurationMs = totalDurationMs
             )
 
+            debugLog("Final AI verdict resolved: safetyLevel=$resolvedSafetyLevel | flagsCount=${mergedFlags.size} | ttft=${firstTokenTimeMs}ms | total=${totalDurationMs}ms")
             auditLogDataSource.insertVerdict(finalVerdict)
             send(StreamState.Success(finalVerdict))
         } catch (ce: CancellationException) {
-            if (ce !is TimeoutCancellationException) throw ce
+            if (ce !is TimeoutCancellationException) {
+                debugLog("performLabelAudit coroutine cancelled normally")
+                throw ce
+            }
             handleFallbackOnFailure(
                 cause = ce,
                 errorKind = AuditErrorKind.NETWORK_TIMEOUT,
@@ -228,11 +256,23 @@ class DefaultAuditRepository(
                 emitState = { send(it) }
             )
         } catch (t: Throwable) {
-            val kind = if (t.message?.contains("Malformed", ignoreCase = true) == true) {
-                AuditErrorKind.MALFORMED_AI_RESPONSE
-            } else {
-                AuditErrorKind.NETWORK_TIMEOUT
+            val msg = t.message.orEmpty()
+            val kind = when {
+                msg.contains("API_KEY_INVALID", ignoreCase = true) ||
+                    msg.contains("API key not valid", ignoreCase = true) ||
+                    msg.contains("API_KEY", ignoreCase = true) ||
+                    t.javaClass.simpleName.contains("InvalidAPIKey", ignoreCase = true) -> {
+                    AuditErrorKind.API_KEY_MISSING
+                }
+                msg.contains("Malformed", ignoreCase = true) ||
+                    t.javaClass.simpleName.contains("Serialization", ignoreCase = true) -> {
+                    AuditErrorKind.MALFORMED_AI_RESPONSE
+                }
+                else -> {
+                    AuditErrorKind.NETWORK_TIMEOUT
+                }
             }
+            debugError("Cloud audit failed -> mapped to errorKind=$kind | exception=[${t::class.java.name}] $msg", t)
             handleFallbackOnFailure(
                 cause = t,
                 errorKind = kind,
@@ -257,12 +297,15 @@ class DefaultAuditRepository(
         emitState: suspend (StreamState<AuditVerdict>) -> Unit
     ) {
         val elapsed = (System.currentTimeMillis() - startTimeMs).coerceAtLeast(1L)
-        val fallbackVerdict = LocalFallbackAuditEngine.evaluateOffline(
-            rawText = cleanText,
-            profile = profile,
-            snapshotThumbnailBytes = thumbnailBytes,
-            elapsedMs = elapsed
-        )
+        val fallbackVerdict = withContext(defaultDispatcher) {
+            LocalFallbackAuditEngine.evaluateOffline(
+                rawText = cleanText,
+                profile = profile,
+                snapshotThumbnailBytes = thumbnailBytes,
+                elapsedMs = elapsed
+            )
+        }
+        debugWarn("Emitting StreamState.Error with offline fallback verdict: errorKind=$errorKind | fallbackLevel=${fallbackVerdict.safetyLevel} | flags=${fallbackVerdict.flaggedIngredients.size} | cause=${cause.message}")
         auditLogDataSource.insertVerdict(fallbackVerdict)
         emitState(
             StreamState.Error(
@@ -280,12 +323,15 @@ class DefaultAuditRepository(
         profile: UserDietaryProfile,
         frameBitmap: Bitmap?
     ): AuditVerdict {
-        val thumbnailBytes = frameBitmap?.let { compressThumbnailInMemory(it) }
-        val verdict = LocalFallbackAuditEngine.evaluateOffline(
-            rawText = rawExtractedText,
-            profile = profile,
-            snapshotThumbnailBytes = thumbnailBytes
-        )
+        debugLog("evaluateOfflineOnly invoked (textLen=${rawExtractedText.length})")
+        val verdict = withContext(defaultDispatcher) {
+            val thumbnailBytes = frameBitmap?.let { compressThumbnailInMemory(it) }
+            LocalFallbackAuditEngine.evaluateOffline(
+                rawText = rawExtractedText,
+                profile = profile,
+                snapshotThumbnailBytes = thumbnailBytes
+            )
+        }
         auditLogDataSource.insertVerdict(verdict)
         return verdict
     }
@@ -310,18 +356,42 @@ class DefaultAuditRepository(
     }
 
     /**
-     * NFR-NT3 & FR-05: Downsamples captured frame in-memory to a small 140px WebP thumbnail
-     * stored exclusively inside the encrypted DB — never written to unencrypted disk files.
+     * NFR-NT3 & FR-05: Downsamples captured frame in-memory to a crisp 480px WebP snapshot
+     * for click-to-zoom inspection, stored exclusively inside the encrypted DB — never written to unencrypted disk files.
      */
     private fun compressThumbnailInMemory(bitmap: Bitmap): ByteArray? = runCatching {
-        val targetSize = 140
+        val targetSize = 480
         val ratio = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
         val width = if (ratio >= 1f) targetSize else (targetSize * ratio).toInt().coerceAtLeast(1)
         val height = if (ratio >= 1f) (targetSize / ratio).toInt().coerceAtLeast(1) else targetSize
         val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
         ByteArrayOutputStream().use { bos ->
-            scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 75, bos)
+            scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 78, bos)
             bos.toByteArray()
         }
     }.getOrNull()
+
+    companion object {
+        private const val TAG = "BiteGuardAI_AuditRepo"
+
+        private fun debugLog(message: String) {
+            if (BuildConfig.DEBUG) {
+                runCatching { Log.d(TAG, message) }
+            }
+        }
+
+        private fun debugWarn(message: String) {
+            if (BuildConfig.DEBUG) {
+                runCatching { Log.w(TAG, message) }
+            }
+        }
+
+        private fun debugError(message: String, throwable: Throwable? = null) {
+            if (BuildConfig.DEBUG) {
+                runCatching {
+                    if (throwable != null) Log.e(TAG, message, throwable) else Log.e(TAG, message)
+                }
+            }
+        }
+    }
 }

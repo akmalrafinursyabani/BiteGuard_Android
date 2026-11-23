@@ -6,6 +6,7 @@ import java.time.Instant
  * Represents the user's active health goals and allergen restrictions.
  */
 data class UserDietaryProfile(
+    val userName: String = "",
     val selectedAllergens: Set<Allergen> = emptySet(),
     val healthGoals: Set<HealthGoal> = emptySet(),
     val lastUpdated: Instant = Instant.now(),

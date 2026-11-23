@@ -9,11 +9,19 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,43 +39,63 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Science
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -75,6 +103,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -84,20 +113,33 @@ import com.biteguard.core.model.AuditErrorKind
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.StreamState
 import com.biteguard.core.ui.components.ActionableFailureCard
+import com.biteguard.core.ui.components.BiteGuardAccordion
+import com.biteguard.core.ui.components.ClickableCapturedImageCard
 import com.biteguard.core.ui.components.FlaggedIngredientCard
 import com.biteguard.core.ui.components.HighlightedRawTextCard
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
-import com.biteguard.core.ui.components.ProgressiveScannerStatusBanner
+import com.biteguard.core.ui.components.OfflineModelLottieAlertDialog
 import com.biteguard.core.ui.components.SafetyVerdictBanner
 import com.biteguard.core.ui.components.VerdictFeedbackRow
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import kotlin.math.max
 
+private enum class ScannerStage {
+    LIVE_CAMERA,
+    SELECT_BLOCKS,
+    AUDIT_RESULT
+}
+
 /**
- * FR-02, FR-03, FR-04, NFR-NT1, NFR-NT2: Real-Time CameraX Edge OCR Scanner,
- * Bounding Box Overlay, Typewriter Streaming Audit Result, and Accessible Decision Actions.
+ * FR-02, FR-03, FR-04, NFR-NT1, NFR-NT2:
+ * 3-Stage Scanning Flow:
+ * 1. LIVE_CAMERA: Calm viewfinder without flickering text boxes; user clicks Scan button to capture & freeze blocks.
+ * 2. SELECT_BLOCKS: User chooses which frozen text block(s) to scan (via interactive image boxes or checklist).
+ * 3. AUDIT_RESULT: Dedicated Result & Filtered Words Screen with click-to-zoom image and Offline Robot Lottie AlertDialog.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -123,106 +165,104 @@ fun ScannerScreen(
         hasCameraPermission = granted
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        if (hasCameraPermission) {
-            CameraXEdgePreviewWithOverlays(
-                state = state,
-                onFrameAnalyzed = { onIntent(ScannerIntent.OnEdgeFrameAnalyzed(it)) },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            CameraPermissionFallbackContent(
-                onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
-                onOpenManualInput = { onIntent(ScannerIntent.ToggleManualInputSheet(true)) },
-                onRunPreset = { preset ->
-                    onIntent(ScannerIntent.TriggerSampleOrManualAudit(preset.rawIngredients))
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+    val currentStage = when {
+        state.streamState is StreamState.Streaming ||
+            state.streamState is StreamState.Success ||
+            state.streamState is StreamState.Error -> ScannerStage.AUDIT_RESULT
+        state.isSelectingBlocks -> ScannerStage.SELECT_BLOCKS
+        else -> ScannerStage.LIVE_CAMERA
+    }
 
-        // Top HUD: Active Profile Summary + Progressive Scanner Status (NFR-NT1)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.TopCenter)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            ActiveProfileHeaderBar(
-                allergenCount = state.profile.selectedAllergens.size,
-                goalCount = state.profile.healthGoals.size,
-                onConfigureClick = onNavigateToProfile
-            )
+    AnimatedContent(
+        targetState = currentStage,
+        transitionSpec = {
+            if (targetState.ordinal > initialState.ordinal) {
+                (slideInHorizontally(tween(300)) { it / 3 } + fadeIn(tween(260))) togetherWith
+                    (slideOutHorizontally(tween(260)) { -it / 3 } + fadeOut(tween(200)))
+            } else {
+                (slideInHorizontally(tween(300)) { -it / 3 } + fadeIn(tween(260))) togetherWith
+                    (slideOutHorizontally(tween(260)) { it / 3 } + fadeOut(tween(200)))
+            }
+        },
+        label = "scannerThreeStageTransition",
+        modifier = modifier.fillMaxSize()
+    ) { stage ->
+        when (stage) {
+            ScannerStage.LIVE_CAMERA -> {
+                // STAGE 1: Calm, uncluttered Live Camera Viewfinder (no shifting/flickering boxes)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (hasCameraPermission) {
+                        CameraXEdgePreviewWithOverlays(
+                            state = state,
+                            onFrameAnalyzed = { onIntent(ScannerIntent.OnEdgeFrameAnalyzed(it)) },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        CameraPermissionFallbackContent(
+                            onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                            onOpenManualInput = { onIntent(ScannerIntent.ToggleManualInputSheet(true)) },
+                            onRunPreset = { preset ->
+                                onIntent(ScannerIntent.TriggerSampleOrManualAudit(preset.rawIngredients))
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
 
-            ProgressiveScannerStatusBanner(
-                stageText = state.progressiveStatusText,
-                detectedBlocksCount = state.liveBoxes.size,
-                isReadyToScan = state.isReadyToScan,
-                isStreaming = state.streamState is StreamState.Streaming,
-                isThrottled = state.isThrottled
-            )
-        }
-
-        // Bottom Controls & Live Audit Result Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Show active Streaming / Success / Error card
-            when (val stream = state.streamState) {
-                is StreamState.Streaming -> {
-                    StreamingTypewriterCard(
-                        stageMessage = stream.stageMessage,
-                        accumulatedSummary = stream.partialVerdict.accumulatedSummary,
-                        partialSafetyLevel = stream.partialVerdict.partialSafetyLevel,
-                        onCancel = { onIntent(ScannerIntent.DismissAuditResult) }
-                    )
-                }
-
-                is StreamState.Success -> {
-                    CompletedVerdictSheetCard(
-                        verdict = stream.data,
-                        profile = state.profile,
-                        onFeedback = { fb -> onIntent(ScannerIntent.SubmitFeedback(stream.data, fb)) },
-                        onScanAnother = { onIntent(ScannerIntent.DismissAuditResult) }
-                    )
-                }
-
-                is StreamState.Error -> {
-                    ErrorAndFallbackResultCard(
-                        errorState = stream,
-                        profile = state.profile,
-                        onRetryCloud = { onIntent(ScannerIntent.RetryFailedAuditWithBackoff) },
-                        onKeepOfflineMatch = { onIntent(ScannerIntent.AcceptOfflineFallbackVerdict) },
-                        onManualEdit = {
-                            onIntent(ScannerIntent.ToggleManualInputSheet(true, stream.cachedRawText))
-                        },
-                        onDismiss = { onIntent(ScannerIntent.DismissAuditResult) }
-                    )
-                }
-
-                StreamState.Idle, is StreamState.ScanningEdge -> {
-                    // Ready-to-Scan Callout & Capture Action Bar
-                    ScannerActionControls(
+                    // Single Uncluttered Top HUD Pill: Live Scanner Status + Guard Profile Chip
+                    CompactScannerTopHud(
+                        stageText = state.progressiveStatusText,
+                        allergenCount = state.profile.selectedAllergens.size,
+                        goalCount = state.profile.healthGoals.size,
                         isReadyToScan = state.isReadyToScan,
-                        hasDetectedText = state.latestOcrText.isNotBlank(),
-                        hasCameraPermission = hasCameraPermission,
-                        onAuditCameraFrame = { onIntent(ScannerIntent.TriggerCaptureAudit) },
-                        onOpenManualInput = { onIntent(ScannerIntent.ToggleManualInputSheet(true)) },
-                        onRunSamplePreset = { preset ->
-                            onIntent(ScannerIntent.TriggerSampleOrManualAudit(preset.rawIngredients))
-                        }
+                        isStreaming = false,
+                        onProfileClick = onNavigateToProfile,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
                     )
+
+                    // Floating Bottom Capture & Sample Controls (only when camera permission is granted)
+                    if (hasCameraPermission) {
+                        ScannerActionControls(
+                            isReadyToScan = state.isReadyToScan,
+                            hasDetectedText = state.latestOcrText.isNotBlank(),
+                            hasCameraPermission = true,
+                            onAuditCameraFrame = { onIntent(ScannerIntent.CaptureFrameForBlockSelection) },
+                            onOpenManualInput = { onIntent(ScannerIntent.ToggleManualInputSheet(true)) },
+                            onRunSamplePreset = { preset ->
+                                onIntent(ScannerIntent.TriggerSampleOrManualAudit(preset.rawIngredients))
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        )
+                    }
                 }
+            }
+
+            ScannerStage.SELECT_BLOCKS -> {
+                // STAGE 2: Frozen Captured Image + Interactive Text Block Picker
+                InteractiveBlockSelectionScreen(
+                    state = state,
+                    onIntent = onIntent,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            ScannerStage.AUDIT_RESULT -> {
+                // STAGE 3: Dedicated Audit Result & Filtered Words Screen
+                DedicatedAuditResultScreen(
+                    state = state,
+                    onIntent = onIntent,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
 
-    // Manual Ingredient Entry / Simulator Bottom Sheet (Accessibility & Emulator support)
+    // Manual Ingredient Entry / Simulator Bottom Sheet with M3 Accordion for presets
     if (state.showManualInputSheet) {
         ModalBottomSheet(
             onDismissRequest = { onIntent(ScannerIntent.ToggleManualInputSheet(false)) }
@@ -234,14 +274,14 @@ fun ScannerScreen(
             ) {
                 item {
                     Text(
-                        text = "Manual Label Audit & Test Presets",
+                        text = "Manual Label Audit",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.semantics { heading() }
                     )
                     Text(
-                        text = "Edit captured OCR text, paste an ingredient label, or tap a realistic package sample below.",
+                        text = "Edit captured OCR text or paste an ingredient label below.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -253,7 +293,8 @@ fun ScannerScreen(
                         onValueChange = { onIntent(ScannerIntent.UpdateManualInputText(it)) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 130.dp),
+                            .heightIn(min = 120.dp),
+                        shape = RoundedCornerShape(14.dp),
                         label = { Text("Package Ingredient Text") },
                         placeholder = {
                             Text("Ingredients: Enriched wheat flour, arachis oil, whey protein...")
@@ -262,84 +303,71 @@ fun ScannerScreen(
                 }
 
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Button(
+                        onClick = {
+                            onIntent(ScannerIntent.TriggerSampleOrManualAudit(state.manualInputText))
+                        },
+                        enabled = state.manualInputText.isNotBlank(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = semanticColors.safe.color,
+                            contentColor = semanticColors.safe.onColor
+                        )
                     ) {
-                        Button(
-                            onClick = {
-                                onIntent(ScannerIntent.TriggerSampleOrManualAudit(state.manualInputText))
-                            },
-                            enabled = state.manualInputText.isNotBlank(),
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 52.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = semanticColors.safe.color,
-                                contentColor = semanticColors.safe.onColor
-                            )
-                        ) {
-                            Icon(imageVector = Icons.Default.DocumentScanner, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Audit Label Now", fontWeight = FontWeight.ExtraBold)
-                        }
+                        Icon(imageVector = Icons.Default.DocumentScanner, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Audit Label Now", fontWeight = FontWeight.ExtraBold)
                     }
                 }
 
                 item {
-                    Text(
-                        text = "Quick Sample Package Labels",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                items(ScannerViewModel.SAMPLE_PRESETS) { preset ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onIntent(ScannerIntent.TriggerSampleOrManualAudit(preset.rawIngredients))
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    BiteGuardAccordion(
+                        title = "Sample Package Presets",
+                        subtitle = "Test BiteGuard AI without a physical package",
+                        badgeText = "${ScannerViewModel.SAMPLE_PRESETS.size} samples",
+                        leadingIcon = Icons.Default.Science,
+                        accentColor = semanticColors.info.color,
+                        initiallyExpanded = false
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Science,
-                                    contentDescription = null,
-                                    tint = semanticColors.info.color,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = preset.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ScannerViewModel.SAMPLE_PRESETS.forEach { preset ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onIntent(
+                                                ScannerIntent.TriggerSampleOrManualAudit(
+                                                    preset.rawIngredients
+                                                )
+                                            )
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = preset.title,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = preset.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = semanticColors.info.color
+                                        )
+                                    }
+                                }
                             }
-                            Text(
-                                text = preset.subtitle,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = semanticColors.info.color
-                            )
-                            Text(
-                                text = preset.rawIngredients,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2
-                            )
                         }
                     }
                 }
@@ -403,6 +431,7 @@ private fun CameraXEdgePreviewWithOverlays(
             runCatching {
                 cameraProviderFuture.get().unbindAll()
             }
+            analyzer.close()
             cameraExecutor.shutdown()
         }
     }
@@ -413,98 +442,465 @@ private fun CameraXEdgePreviewWithOverlays(
             modifier = Modifier.fillMaxSize()
         )
 
-        // FR-02: Real-Time Bounding Box Overlay mapped from ImageProxy space to FILL_CENTER Canvas space
         val safeColor = semanticColors.safe.color
-        val safeContainer = semanticColors.safe.colorContainer.copy(alpha = 0.25f)
-        val infoColor = semanticColors.info.color
-        val infoContainer = semanticColors.info.colorContainer.copy(alpha = 0.18f)
+        val guideColor = if (state.isReadyToScan) safeColor else Color.White.copy(alpha = 0.72f)
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val imgW = state.frameWidth.toFloat().coerceAtLeast(1f)
-            val imgH = state.frameHeight.toFloat().coerceAtLeast(1f)
-            val scale = max(size.width / imgW, size.height / imgH)
-            val offsetX = (size.width - imgW * scale) / 2f
-            val offsetY = (size.height - imgH * scale) / 2f
+            // Calm corner focus reticle in the middle of the live viewfinder (no flickering live boxes)
+            val frameW = size.width * 0.78f
+            val frameH = size.height * 0.34f
+            val frameLeft = (size.width - frameW) / 2f
+            val frameTop = (size.height - frameH) * 0.42f
+            val cornerLen = 40f
+            val strokeW = 7f
 
-            for (box in state.liveBoxes) {
-                val left = box.boundingBox.left * scale + offsetX
-                val top = box.boundingBox.top * scale + offsetY
-                val right = box.boundingBox.right * scale + offsetX
-                val bottom = box.boundingBox.bottom * scale + offsetY
-                val rectSize = Size((right - left).coerceAtLeast(8f), (bottom - top).coerceAtLeast(8f))
-
-                val strokeColor = if (box.containsIngredientKeyword) safeColor else infoColor
-                val fillColor = if (box.containsIngredientKeyword) safeContainer else infoContainer
-
-                drawRoundRect(
-                    color = fillColor,
-                    topLeft = Offset(left, top),
-                    size = rectSize,
-                    cornerRadius = CornerRadius(12f, 12f)
-                )
-                drawRoundRect(
-                    color = strokeColor,
-                    topLeft = Offset(left, top),
-                    size = rectSize,
-                    cornerRadius = CornerRadius(12f, 12f),
-                    style = Stroke(width = if (box.containsIngredientKeyword) 7f else 4f)
-                )
-            }
+            // Top-left corner
+            drawLine(guideColor, Offset(frameLeft, frameTop), Offset(frameLeft + cornerLen, frameTop), strokeW, StrokeCap.Round)
+            drawLine(guideColor, Offset(frameLeft, frameTop), Offset(frameLeft, frameTop + cornerLen), strokeW, StrokeCap.Round)
+            // Top-right corner
+            drawLine(guideColor, Offset(frameLeft + frameW, frameTop), Offset(frameLeft + frameW - cornerLen, frameTop), strokeW, StrokeCap.Round)
+            drawLine(guideColor, Offset(frameLeft + frameW, frameTop), Offset(frameLeft + frameW, frameTop + cornerLen), strokeW, StrokeCap.Round)
+            // Bottom-left corner
+            drawLine(guideColor, Offset(frameLeft, frameTop + frameH), Offset(frameLeft + cornerLen, frameTop + frameH), strokeW, StrokeCap.Round)
+            drawLine(guideColor, Offset(frameLeft, frameTop + frameH), Offset(frameLeft, frameTop + frameH - cornerLen), strokeW, StrokeCap.Round)
+            // Bottom-right corner
+            drawLine(guideColor, Offset(frameLeft + frameW, frameTop + frameH), Offset(frameLeft + frameW - cornerLen, frameTop + frameH), strokeW, StrokeCap.Round)
+            drawLine(guideColor, Offset(frameLeft + frameW, frameTop + frameH), Offset(frameLeft + frameW, frameTop + frameH - cornerLen), strokeW, StrokeCap.Round)
         }
     }
 }
 
+/**
+ * STAGE 2: Interactive Frozen Block Picker Screen.
+ * Uses clean vertical stacked headers and toolbars so nothing gets squished horizontally.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ActiveProfileHeaderBar(
-    allergenCount: Int,
-    goalCount: Int,
-    onConfigureClick: () -> Unit,
+private fun InteractiveBlockSelectionScreen(
+    state: ScannerUiState,
+    onIntent: (ScannerIntent) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Active Guard Profile",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "$allergenCount Allergen(s) • $goalCount Health Goal(s)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+    val semanticColors = LocalBiteGuardSemanticColors.current
+    val frozenBitmap = remember(state.capturedFrameBitmap) {
+        state.capturedFrameBitmap?.asImageBitmap()
+    }
+    val allSelected = state.capturedBoxes.isNotEmpty() &&
+        state.selectedBlockIndices.size == state.capturedBoxes.size
 
-            FilledTonalButton(
-                onClick = onConfigureClick,
-                modifier = Modifier.heightIn(min = 44.dp)
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Top Header Bar (Stacked vertically for clean alignment matching Audit Result screen)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            OutlinedButton(
+                onClick = { onIntent(ScannerIntent.CancelBlockSelection) },
+                modifier = Modifier.heightIn(min = 40.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Retake photo",
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Edit Profile", fontWeight = FontWeight.Bold)
+                Text("Retake Photo", fontWeight = FontWeight.Bold)
+            }
+
+            Text(
+                text = "Choose Text Blocks to Scan",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = "${state.selectedBlockIndices.size} of ${state.capturedBoxes.size} detected block(s) selected",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // Frozen Captured Frame with Interactive Tap-to-Toggle Bounding Boxes
+        if (frozenBitmap != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                ),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Image(
+                        bitmap = frozenBitmap,
+                        contentDescription = "Frozen captured package frame. Tap highlighted boxes to toggle selection.",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    val safeColor = semanticColors.safe.color
+                    val safeContainer = semanticColors.safe.colorContainer.copy(alpha = 0.34f)
+                    val unselectedStroke = Color.White.copy(alpha = 0.70f)
+                    val unselectedFill = Color.Black.copy(alpha = 0.25f)
+
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(state.capturedBoxes, state.capturedFrameWidth, state.capturedFrameHeight) {
+                                detectTapGestures { tapOffset ->
+                                    val imgW = state.capturedFrameWidth.toFloat().coerceAtLeast(1f)
+                                    val imgH = state.capturedFrameHeight.toFloat().coerceAtLeast(1f)
+                                    val scale = max(size.width / imgW, size.height / imgH)
+                                    val offsetX = (size.width - imgW * scale) / 2f
+                                    val offsetY = (size.height - imgH * scale) / 2f
+
+                                    val tappedIdx = state.capturedBoxes.indexOfFirst { box ->
+                                        val left = box.boundingBox.left * scale + offsetX
+                                        val top = box.boundingBox.top * scale + offsetY
+                                        val right = box.boundingBox.right * scale + offsetX
+                                        val bottom = box.boundingBox.bottom * scale + offsetY
+                                        tapOffset.x in left..right && tapOffset.y in top..bottom
+                                    }
+                                    if (tappedIdx != -1) {
+                                        onIntent(ScannerIntent.ToggleBlockSelection(tappedIdx))
+                                    }
+                                }
+                            }
+                    ) {
+                        val imgW = state.capturedFrameWidth.toFloat().coerceAtLeast(1f)
+                        val imgH = state.capturedFrameHeight.toFloat().coerceAtLeast(1f)
+                        val scale = max(size.width / imgW, size.height / imgH)
+                        val offsetX = (size.width - imgW * scale) / 2f
+                        val offsetY = (size.height - imgH * scale) / 2f
+
+                        state.capturedBoxes.forEachIndexed { idx, box ->
+                            val isSelected = idx in state.selectedBlockIndices
+                            val left = box.boundingBox.left * scale + offsetX
+                            val top = box.boundingBox.top * scale + offsetY
+                            val right = box.boundingBox.right * scale + offsetX
+                            val bottom = box.boundingBox.bottom * scale + offsetY
+                            val rectSize = Size((right - left).coerceAtLeast(12f), (bottom - top).coerceAtLeast(12f))
+
+                            drawRoundRect(
+                                color = if (isSelected) safeContainer else unselectedFill,
+                                topLeft = Offset(left, top),
+                                size = rectSize,
+                                cornerRadius = CornerRadius(10f, 10f)
+                            )
+                            drawRoundRect(
+                                color = if (isSelected) safeColor else unselectedStroke,
+                                topLeft = Offset(left, top),
+                                size = rectSize,
+                                cornerRadius = CornerRadius(10f, 10f),
+                                style = Stroke(width = if (isSelected) 6f else 3f)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "Tap boxes on photo or check cards below",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Clean Stacked Action Toolbar (Select All / Edit Text side-by-side with equal weight)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    if (allSelected) {
+                        onIntent(ScannerIntent.ClearCapturedBlockSelection)
+                    } else {
+                        onIntent(ScannerIntent.SelectAllCapturedBlocks)
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 42.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SelectAll,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (allSelected) "Clear All" else "Select All",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    val currentSelectionText = state.selectedBlockIndices
+                        .sorted()
+                        .mapNotNull { state.capturedBoxes.getOrNull(it)?.text }
+                        .joinToString("\n")
+                    onIntent(ScannerIntent.ToggleManualInputSheet(true, currentSelectionText))
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 42.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.EditNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Edit Text", fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Scrollable List of Frozen OCR Blocks (Vertical Card Layout)
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 8.dp)
+        ) {
+            itemsIndexed(state.capturedBoxes) { index, box ->
+                val isSelected = index in state.selectedBlockIndices
+                val borderColor = when {
+                    isSelected -> semanticColors.safe.color
+                    box.containsIngredientKeyword -> semanticColors.info.color
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                }
+                val containerColor = if (isSelected) {
+                    semanticColors.safe.colorContainer.copy(alpha = 0.40f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onIntent(ScannerIntent.ToggleBlockSelection(index)) },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = containerColor),
+                    border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = null
+                                )
+                                Text(
+                                    text = "Block #${index + 1}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (box.containsIngredientKeyword) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = semanticColors.safe.color,
+                                    contentColor = semanticColors.safe.onColor
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "INGREDIENTS",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = box.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        // Confirm & Scan Selected Blocks CTA
+        Button(
+            onClick = { onIntent(ScannerIntent.ConfirmBlockSelectionAndAudit) },
+            enabled = state.selectedBlockIndices.isNotEmpty(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 54.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = semanticColors.safe.color,
+                contentColor = semanticColors.safe.onColor
+            )
+        ) {
+            Icon(imageVector = Icons.Default.DocumentScanner, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Scan Selected Blocks (${state.selectedBlockIndices.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+    }
+}
+
+/**
+ * Single sleek M3 Top HUD combining progressive scanner status and active guard chip.
+ * Replaces the old double-stacked top boxes so the camera preview stays open and focused.
+ */
+@Composable
+private fun CompactScannerTopHud(
+    stageText: String,
+    allergenCount: Int,
+    goalCount: Int,
+    isReadyToScan: Boolean,
+    isStreaming: Boolean,
+    onProfileClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val semanticColors = LocalBiteGuardSemanticColors.current
+    val statusFamily = when {
+        isReadyToScan -> semanticColors.safe
+        isStreaming -> semanticColors.info
+        else -> null
+    }
+
+    Surface(
+        modifier = modifier
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = stageText
+            },
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        border = BorderStroke(
+            width = 1.5.dp,
+            color = statusFamily?.color ?: MaterialTheme.colorScheme.outlineVariant
+        ),
+        tonalElevation = 4.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isReadyToScan) Icons.Default.CheckCircle else Icons.Default.Info,
+                        contentDescription = null,
+                        tint = statusFamily?.color ?: MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = stageText,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    onClick = onProfileClick,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "${allergenCount + goalCount} Guards",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            if (isStreaming) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = semanticColors.info.color
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Clean, floating M3 bottom controls without a heavy outer card blocking the camera preview.
+ */
 @Composable
 private fun ScannerActionControls(
     isReadyToScan: Boolean,
@@ -518,96 +914,224 @@ private fun ScannerActionControls(
     val semanticColors = LocalBiteGuardSemanticColors.current
     val buttonFamily = if (isReadyToScan) semanticColors.safe else semanticColors.info
 
-    Card(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
-        ),
-        border = BorderStroke(2.dp, buttonFamily.color)
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (hasCameraPermission) {
-                ExtendedFloatingActionButton(
-                    onClick = onAuditCameraFrame,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                        .semantics {
-                            contentDescription = if (isReadyToScan) {
-                                "Ready to Scan. Tap to audit detected ingredient list with BiteGuard AI"
-                            } else {
-                                "Audit current camera text with BiteGuard AI"
-                            }
-                        },
-                    containerColor = buttonFamily.color,
-                    contentColor = buttonFamily.onColor,
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.DocumentScanner,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp)
-                        )
+        if (hasCameraPermission) {
+            ExtendedFloatingActionButton(
+                onClick = onAuditCameraFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .semantics {
+                        contentDescription = if (isReadyToScan) {
+                            "Ready to Scan. Tap to audit detected ingredient list with BiteGuard AI"
+                        } else {
+                            "Audit current camera text with BiteGuard AI"
+                        }
                     },
-                    text = {
-                        Text(
-                            text = when {
-                                isReadyToScan -> "READY TO SCAN — AUDIT INGREDIENTS"
-                                hasDetectedText -> "AUDIT DETECTED TEXT NOW"
-                                else -> "SCAN LABEL / CAPTURE FRAME"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
+                shape = RoundedCornerShape(18.dp),
+                containerColor = buttonFamily.color,
+                contentColor = buttonFamily.onColor,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.DocumentScanner,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                },
+                text = {
+                    Text(
+                        text = when {
+                            isReadyToScan -> "READY — CAPTURE & PICK BLOCKS"
+                            hasDetectedText -> "CAPTURE & CHOOSE TEXT BLOCKS"
+                            else -> "SCAN PACKAGE LABEL"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            FilledTonalButton(
+                onClick = onOpenManualInput,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.EditNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
                 )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Manual Text", fontWeight = FontWeight.Bold)
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            FilledTonalButton(
+                onClick = { onRunSamplePreset(ScannerViewModel.SAMPLE_PRESETS.first()) },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
-                OutlinedButton(
-                    onClick = onOpenManualInput,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.EditNote,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Type / Paste Label", fontWeight = FontWeight.Bold)
-                }
-
-                FilledTonalButton(
-                    onClick = { onRunSamplePreset(ScannerViewModel.SAMPLE_PRESETS.first()) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Science,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Demo Sample", fontWeight = FontWeight.Bold)
-                }
+                Icon(
+                    imageVector = Icons.Default.Science,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Demo Sample", fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 /**
- * NFR-NT1: Streaming visual feedback with live typewriter text reveal.
+ * Dedicated "Next Screen" for Audit Results:
+ * 1. Moves all post-scan results and the Offline Robot Lottie AlertDialog out of the live camera viewfinder.
+ * 2. Clearly separates the Overall Safety Verdict from the "Filtered & Flagged Words" breakdown.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DedicatedAuditResultScreen(
+    state: ScannerUiState,
+    onIntent: (ScannerIntent) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentStream = state.streamState
+    var offlineDialogDismissed by rememberSaveable(currentStream.hashCode()) {
+        mutableStateOf(false)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Result Screen Top Header Bar
+        Column (
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.Start
+//            verticalAlignment = Alignment.CenterVertically,
+//            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            OutlinedButton(
+                onClick = { onIntent(ScannerIntent.DismissAuditResult) },
+                modifier = Modifier.heightIn(min = 42.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to camera scanner",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Back to Camera", fontWeight = FontWeight.Bold)
+            }
+            Text(
+                text = "Label Audit Result",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // Main Result Content
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            when (currentStream) {
+                is StreamState.Streaming -> {
+                    StreamingTypewriterCard(
+                        stageMessage = currentStream.stageMessage,
+                        accumulatedSummary = currentStream.partialVerdict.accumulatedSummary,
+                        partialSafetyLevel = currentStream.partialVerdict.partialSafetyLevel,
+                        onCancel = { onIntent(ScannerIntent.DismissAuditResult) }
+                    )
+                }
+
+                is StreamState.Success -> {
+                    CompletedVerdictSheetCard(
+                        verdict = currentStream.data,
+                        profile = state.profile,
+                        onFeedback = { fb -> onIntent(ScannerIntent.SubmitFeedback(currentStream.data, fb)) },
+                        onScanAnother = { onIntent(ScannerIntent.DismissAuditResult) }
+                    )
+                }
+
+                is StreamState.Error -> {
+                    ErrorAndFallbackResultCard(
+                        errorState = currentStream,
+                        profile = state.profile,
+                        onRetryCloud = { onIntent(ScannerIntent.RetryFailedAuditWithBackoff) },
+                        onKeepOfflineMatch = { onIntent(ScannerIntent.AcceptOfflineFallbackVerdict) },
+                        onManualEdit = {
+                            onIntent(ScannerIntent.ToggleManualInputSheet(true, currentStream.cachedRawText))
+                        },
+                        onDismiss = { onIntent(ScannerIntent.DismissAuditResult) }
+                    )
+                }
+
+                else -> Unit
+            }
+        }
+    }
+
+    // Offline / Model Not Loading Lottie AlertDialog hosted on the dedicated Result Screen
+    if (currentStream is StreamState.Error) {
+        val isModelOfflineOrFailed = currentStream.errorKind in setOf(
+            AuditErrorKind.NETWORK_TIMEOUT,
+            AuditErrorKind.API_KEY_MISSING,
+            AuditErrorKind.MALFORMED_AI_RESPONSE,
+            AuditErrorKind.UNKNOWN
+        )
+        if (isModelOfflineOrFailed && !offlineDialogDismissed) {
+            OfflineModelLottieAlertDialog(
+                errorKind = currentStream.errorKind,
+                fallbackVerdict = currentStream.fallbackVerdict,
+                retryAttempt = currentStream.retryAttempt,
+                onAcceptLocalVerdict = {
+                    offlineDialogDismissed = true
+                    onIntent(ScannerIntent.AcceptOfflineFallbackVerdict)
+                },
+                onRetryCloudModel = {
+                    offlineDialogDismissed = true
+                    onIntent(ScannerIntent.RetryFailedAuditWithBackoff)
+                },
+                onDismiss = {
+                    offlineDialogDismissed = true
+                }
+            )
+        }
+    }
+}
+
+/**
+ * NFR-NT1: Streaming visual feedback with live typewriter text reveal on the Result Screen.
  */
 @Composable
 private fun StreamingTypewriterCard(
@@ -635,11 +1159,11 @@ private fun StreamingTypewriterCard(
             .semantics {
                 liveRegion = LiveRegionMode.Polite
             },
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
     ) {
         Column(
             modifier = Modifier
@@ -663,6 +1187,8 @@ private fun StreamingTypewriterCard(
                 }
             }
 
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+
             if (partialSafetyLevel != null) {
                 SafetyVerdictBanner(safetyLevel = partialSafetyLevel)
             }
@@ -680,11 +1206,12 @@ private fun StreamingTypewriterCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompletedVerdictSheetCard(
     verdict: AuditVerdict,
     profile: com.biteguard.core.model.UserDietaryProfile,
-    onFeedback: ( com.biteguard.core.model.UserFeedback) -> Unit,
+    onFeedback: (com.biteguard.core.model.UserFeedback) -> Unit,
     onScanAnother: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -700,96 +1227,198 @@ private fun CompletedVerdictSheetCard(
         }
     }
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(max = 520.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(2.5.dp, family.color)
+    val filteredKeywords by produceState(
+        initialValue = emptyList(),
+        key1 = verdict,
+        key2 = profile
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                SafetyVerdictBanner(
-                    safetyLevel = verdict.safetyLevel,
-                    isOfflineFallback = verdict.isOfflineFallback
-                )
-            }
+        value = withContext(Dispatchers.Default) {
+            LocalFallbackAuditEngine.extractHighlightTerms(verdict, profile)
+        }
+    }
 
-            item {
-                Text(
-                    text = verdict.summary.take(visibleChars),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            if (verdict.flaggedIngredients.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Flagged Ingredients (${verdict.flaggedIngredients.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.semantics { heading() }
-                    )
-                }
-                items(verdict.flaggedIngredients) { flag ->
-                    FlaggedIngredientCard(ingredient = flag)
-                }
-            }
-
-            item {
-                val highlights = remember(verdict, profile) {
-                    LocalFallbackAuditEngine.extractHighlightTerms(verdict, profile)
-                }
-                HighlightedRawTextCard(
-                    rawText = verdict.rawExtractedText,
-                    highlightedKeywords = highlights
-                )
-            }
-
-            item {
-                VerdictFeedbackRow(
-                    ttftMs = verdict.ttftMs,
-                    totalDurationMs = verdict.totalStreamDurationMs,
-                    selectedFeedback = verdict.userFeedback,
-                    onSubmitFeedback = onFeedback
-                )
-            }
-
-            item {
-                MedicalDisclaimerBanner()
-            }
-
-            item {
-                Button(
-                    onClick = onScanAnother,
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 16.dp)
+    ) {
+        // SECTION 1: Overall Verdict & AI Summary Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                border = BorderStroke(2.dp, family.color)
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 52.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = family.color,
-                        contentColor = family.onColor
-                    )
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("Scan Next Package", fontWeight = FontWeight.ExtraBold)
+                    SafetyVerdictBanner(
+                        safetyLevel = verdict.safetyLevel,
+                        isOfflineFallback = verdict.isOfflineFallback
+                    )
+
+                    Text(
+                        text = verdict.summary.take(visibleChars),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
+            }
+        }
+
+        // Captured Package Image with Click-to-Zoom
+        if (verdict.snapshotThumbnailBytes != null) {
+            item {
+                ClickableCapturedImageCard(
+                    thumbnailBytes = verdict.snapshotThumbnailBytes,
+                    title = verdict.productName,
+                    subtitle = "Scanned package photo • Tap to zoom"
+                )
+            }
+        }
+
+        // SECTION 2: Separated "Filtered & Flagged Words" Card
+        if (verdict.flaggedIngredients.isNotEmpty() || filteredKeywords.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FilterAlt,
+                                contentDescription = null,
+                                tint = family.color
+                            )
+                            Text(
+                                text = "Filtered Words & Flagged Ingredients (${verdict.flaggedIngredients.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.semantics { heading() }
+                            )
+                        }
+
+                        if (filteredKeywords.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                filteredKeywords.forEach { word ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = family.colorContainer,
+                                        contentColor = family.onColorContainer,
+                                        border = BorderStroke(1.dp, family.color)
+                                    ) {
+                                        Text(
+                                            text = word,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        val primaryFlags = verdict.flaggedIngredients.take(2)
+                        val overflowFlags = verdict.flaggedIngredients.drop(2)
+
+                        primaryFlags.forEach { flag ->
+                            FlaggedIngredientCard(ingredient = flag)
+                        }
+
+                        if (overflowFlags.isNotEmpty()) {
+                            BiteGuardAccordion(
+                                title = "More Flagged Ingredients",
+                                subtitle = "Tap to view ${overflowFlags.size} additional flagged item(s)",
+                                badgeText = "+${overflowFlags.size}",
+                                accentColor = family.color,
+                                initiallyExpanded = false
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    overflowFlags.forEach { flag ->
+                                        FlaggedIngredientCard(ingredient = flag)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // SECTION 3: Accuracy Feedback Row
+        item {
+            VerdictFeedbackRow(
+                ttftMs = verdict.ttftMs,
+                totalDurationMs = verdict.totalStreamDurationMs,
+                selectedFeedback = verdict.userFeedback,
+                onSubmitFeedback = onFeedback
+            )
+        }
+
+        // SECTION 4: Accordion for Raw Extracted Label Text & Medical Disclaimer
+        item {
+            BiteGuardAccordion(
+                title = "Extracted OCR Text & Disclaimer",
+                subtitle = "Inspect raw package label with filtered words highlighted",
+                leadingIcon = Icons.Default.Description,
+                accentColor = MaterialTheme.colorScheme.primary,
+                initiallyExpanded = false
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HighlightedRawTextCard(
+                        rawText = verdict.rawExtractedText,
+                        highlightedKeywords = filteredKeywords
+                    )
+                    MedicalDisclaimerBanner()
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = onScanAnother,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = family.color,
+                    contentColor = family.onColor
+                )
+            ) {
+                Text("Scan Next Package", fontWeight = FontWeight.ExtraBold)
             }
         }
     }
 }
 
 /**
- * FR-04: Clear Error & Offline Fallback decision UI showing the ActionableFailureCard,
- * immediate local verdict, and highlighted raw text so the user can decide safely.
+ * FR-04: Clear Error & Offline Fallback decision UI on the dedicated Result Screen.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ErrorAndFallbackResultCard(
     errorState: StreamState.Error,
@@ -800,81 +1429,114 @@ private fun ErrorAndFallbackResultCard(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val semanticColors = LocalBiteGuardSemanticColors.current
     val fallback = errorState.fallbackVerdict
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(max = 540.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(2.dp, MaterialTheme.colorScheme.outline)
+    val highlights by produceState(
+        initialValue = emptyList(),
+        key1 = fallback,
+        key2 = profile
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        value = if (fallback != null) {
+            withContext(Dispatchers.Default) {
+                LocalFallbackAuditEngine.extractHighlightTerms(fallback, profile)
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 16.dp)
+    ) {
+        item {
+            ActionableFailureCard(
+                errorKind = errorState.errorKind,
+                errorMessage = errorState.throwable.message.orEmpty(),
+                retryAttempt = errorState.retryAttempt,
+                hasOfflineFallback = fallback != null,
+                onRetryCloudAudit = onRetryCloud,
+                onUseOfflineMatch = if (fallback != null) onKeepOfflineMatch else null,
+                onRetakeOrManualEdit = onManualEdit
+            )
+        }
+
+        if (fallback != null) {
+            val family = semanticColors.forSafetyLevel(fallback.safetyLevel)
+
             item {
-                ActionableFailureCard(
-                    errorKind = errorState.errorKind,
-                    errorMessage = errorState.throwable.message.orEmpty(),
-                    retryAttempt = errorState.retryAttempt,
-                    hasOfflineFallback = fallback != null,
-                    onRetryCloudAudit = onRetryCloud,
-                    onUseOfflineMatch = if (fallback != null) onKeepOfflineMatch else null,
-                    onRetakeOrManualEdit = onManualEdit
+                SafetyVerdictBanner(
+                    safetyLevel = fallback.safetyLevel,
+                    isOfflineFallback = true
                 )
             }
 
-            if (fallback != null) {
+            if (fallback.snapshotThumbnailBytes != null) {
                 item {
-                    SafetyVerdictBanner(
-                        safetyLevel = fallback.safetyLevel,
-                        isOfflineFallback = true
-                    )
-                }
-
-                item {
-                    Text(
-                        text = fallback.summary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                if (fallback.flaggedIngredients.isNotEmpty()) {
-                    items(fallback.flaggedIngredients) { flag ->
-                        FlaggedIngredientCard(ingredient = flag)
-                    }
-                }
-
-                item {
-                    val highlights = remember(fallback, profile) {
-                        LocalFallbackAuditEngine.extractHighlightTerms(fallback, profile)
-                    }
-                    HighlightedRawTextCard(
-                        rawText = fallback.rawExtractedText,
-                        highlightedKeywords = highlights
+                    ClickableCapturedImageCard(
+                        thumbnailBytes = fallback.snapshotThumbnailBytes,
+                        title = fallback.productName,
+                        subtitle = "Captured package photo • Tap to zoom"
                     )
                 }
             }
 
             item {
-                MedicalDisclaimerBanner()
-            }
-
-            item {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
+                BiteGuardAccordion(
+                    title = "Filtered Words & Local Rule Details",
+                    subtitle = fallback.summary,
+                    badgeText = "${fallback.flaggedIngredients.size} flagged",
+                    leadingIcon = Icons.Default.FilterAlt,
+                    accentColor = family.color,
+                    initiallyExpanded = true
                 ) {
-                    Text("Back to Live Camera", fontWeight = FontWeight.Bold)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (highlights.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                highlights.forEach { word ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = family.colorContainer,
+                                        contentColor = family.onColorContainer,
+                                        border = BorderStroke(1.dp, family.color)
+                                    ) {
+                                        Text(
+                                            text = word,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        fallback.flaggedIngredients.forEach { flag ->
+                            FlaggedIngredientCard(ingredient = flag)
+                        }
+
+                        HighlightedRawTextCard(
+                            rawText = fallback.rawExtractedText,
+                            highlightedKeywords = highlights
+                        )
+                    }
                 }
+            }
+        }
+
+        item {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Back to Live Camera", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -892,47 +1554,132 @@ private fun CameraPermissionFallbackContent(
     Column(
         modifier = modifier
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp, vertical = 140.dp),
+            .padding(horizontal = 20.dp, vertical = 84.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        ActionableFailureCard(
-            errorKind = AuditErrorKind.CAMERA_UNAVAILABLE,
-            errorMessage = "Grant camera permission for real-time OCR bounding boxes, or test immediately with manual text or sample labels.",
-            retryAttempt = 0,
-            hasOfflineFallback = true,
-            onRetryCloudAudit = onRequestPermission,
-            onRetakeOrManualEdit = onOpenManualInput
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = onRequestPermission,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 52.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = semanticColors.safe.color,
-                contentColor = semanticColors.safe.onColor
-            )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
-            Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Grant Camera Permission", fontWeight = FontWeight.ExtraBold)
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = semanticColors.safe.colorContainer,
+                        contentColor = semanticColors.safe.onColorContainer,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
 
-        Spacer(modifier = Modifier.height(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Camera Access Needed",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Live OCR Label Scanner",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
-        FilledTonalButton(
-            onClick = { onRunPreset(ScannerViewModel.SAMPLE_PRESETS.first()) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-        ) {
-            Icon(imageVector = Icons.Default.Science, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Run Sample Label Audit (No Camera Needed)", fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Grant camera permission to capture package ingredient blocks, or test immediately using manual text or a sample label below.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = onRequestPermission,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = semanticColors.safe.color,
+                        contentColor = semanticColors.safe.onColor
+                    )
+                ) {
+                    Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Grant Camera Permission", fontWeight = FontWeight.ExtraBold)
+                }
+
+                OutlinedButton(
+                    onClick = { onRunPreset(ScannerViewModel.SAMPLE_PRESETS.first()) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Science,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Run Sample Label Audit",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onOpenManualInput,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.EditNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Paste / Edit Ingredient Text",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         }
     }
 }
+

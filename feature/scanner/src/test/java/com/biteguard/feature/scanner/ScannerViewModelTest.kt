@@ -290,4 +290,82 @@ class ScannerViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    /**
+     * Use Case 6 (3-Stage Block Picker Flow): Capturing a frame freezes detected OCR blocks so
+     * subsequent camera frames do not overwrite them, pre-selects ingredient blocks, allows toggling,
+     * and audits the chosen blocks.
+     */
+    @Test
+    fun `UseCase 6 - CaptureFrameForBlockSelection freezes OCR blocks and audits user-selected blocks`() = runTest {
+        var auditedRawText = ""
+        val recordingAi = object : AiStreamDataSource {
+            override val isApiKeyConfigured: Boolean = true
+            override fun streamLabelAudit(
+                rawExtractedText: String,
+                profile: UserDietaryProfile,
+                frameBitmap: Bitmap?
+            ): Flow<String> = flow {
+                auditedRawText = rawExtractedText
+                emit("VERDICT: SAFE\nSUMMARY: Selected blocks are safe.\nFLAGS_JSON: []")
+            }
+        }
+        val viewModel = ScannerViewModel(
+            auditRepository = DefaultAuditRepository(recordingAi, InMemoryAuditLogDataSource()),
+            profileRepository = InMemoryProfileRepository()
+        )
+
+        viewModel.uiState.test {
+            awaitItem() // Idle
+
+            val frame1 = EdgeOcrFrameResult(
+                fullText = "Brand Header\nIngredients: Oats, Honey\nNet Wt 200g",
+                boxes = listOf(
+                    DetectedTextBox("Brand Header", Rect(0, 0, 100, 40), containsIngredientKeyword = false),
+                    DetectedTextBox("Ingredients: Oats, Honey", Rect(0, 50, 300, 120), containsIngredientKeyword = true),
+                    DetectedTextBox("Net Wt 200g", Rect(0, 130, 100, 160), containsIngredientKeyword = false)
+                ),
+                imageWidth = 1080,
+                imageHeight = 1920,
+                isReadyToScan = true,
+                isThrottled = false,
+                processingLatencyMs = 45L,
+                latestFrameBitmap = null
+            )
+
+            viewModel.onIntent(ScannerIntent.OnEdgeFrameAnalyzed(frame1))
+            var state = awaitItem()
+            if (state.streamState is StreamState.Idle) {
+                state = awaitItem()
+            }
+
+            // Freeze frame for block selection
+            viewModel.onIntent(ScannerIntent.CaptureFrameForBlockSelection)
+            state = awaitItem()
+            while (!state.isSelectingBlocks) {
+                state = awaitItem()
+            }
+            assertTrue(state.isSelectingBlocks)
+            assertEquals(3, state.capturedBoxes.size)
+            // Block #1 ("Ingredients: Oats, Honey") is automatically pre-selected
+            assertEquals(setOf(1), state.selectedBlockIndices)
+
+            // User also selects Block #0 ("Brand Header")
+            viewModel.onIntent(ScannerIntent.ToggleBlockSelection(0))
+            state = awaitItem()
+            assertEquals(setOf(0, 1), state.selectedBlockIndices)
+
+            // User confirms block selection and runs audit
+            viewModel.onIntent(ScannerIntent.ConfirmBlockSelectionAndAudit)
+            state = awaitItem()
+            while (state.streamState !is StreamState.Success) {
+                state = awaitItem()
+            }
+
+            assertFalse(state.isSelectingBlocks)
+            assertTrue(state.streamState is StreamState.Success)
+            assertEquals("Brand Header\nIngredients: Oats, Honey", auditedRawText)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 }

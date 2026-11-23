@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.atomic.AtomicBoolean
@@ -91,7 +92,6 @@ class EdgeTextAnalyzer(
         val orientedHeight = if (isRotated90or270) imageProxy.width else imageProxy.height
 
         val inputImage = InputImage.fromMediaImage(mediaImage, rotationDegrees)
-        val snapshotBitmap = runCatching { imageProxy.toBitmap() }.getOrNull()
 
         scope.launch {
             val startTime = System.currentTimeMillis()
@@ -112,6 +112,13 @@ class EdgeTextAnalyzer(
 
                 val fullText = visionText.text.trim()
                 val isReady = boxes.any { it.containsIngredientKeyword } || containsStructuralKeyword(fullText)
+
+                // Decode bitmap on background thread (Dispatchers.Default) only when text is present
+                val snapshotBitmap = if (boxes.isNotEmpty()) {
+                    runCatching { imageProxy.toBitmap() }.getOrNull()
+                } else {
+                    null
+                }
 
                 // Check if text or bounding box centroids changed to manage 5-second thermal throttling
                 val currentSignature = fullText.lowercase().take(180).hashCode()
@@ -139,8 +146,10 @@ class EdgeTextAnalyzer(
                         latestFrameBitmap = snapshotBitmap
                     )
                 )
-            } catch (_: Throwable) {
-                // Frame drop or cancellation is ignored gracefully
+            } catch (t: Throwable) {
+                runCatching {
+                    android.util.Log.w(TAG, "Edge OCR frame skipped/failed: [${t::class.java.simpleName}] ${t.message}")
+                }
             } finally {
                 // NFR-T2: Always close ImageProxy immediately after processing
                 imageProxy.close()
@@ -149,7 +158,13 @@ class EdgeTextAnalyzer(
         }
     }
 
+    fun close() {
+        scope.cancel()
+        runCatching { recognizer.close() }
+    }
+
     companion object {
+        private const val TAG = "BiteGuardAI_EdgeOCR"
         private val STRUCTURAL_KEYWORDS = listOf(
             "ingredients:",
             "ingredients",

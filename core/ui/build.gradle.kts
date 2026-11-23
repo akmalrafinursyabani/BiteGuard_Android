@@ -32,5 +32,6 @@ dependencies {
     api(libs.androidx.compose.ui.graphics)
     api(libs.androidx.compose.ui.text.google.fonts)
     api(libs.androidx.compose.ui.tooling.preview)
+    api(libs.lottie.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -21,15 +21,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
@@ -51,10 +55,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -69,18 +78,24 @@ import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.SafetyLevel
+import com.biteguard.core.ui.components.BiteGuardAccordion
+import com.biteguard.core.ui.components.ClickableCapturedImageCard
 import com.biteguard.core.ui.components.FlaggedIngredientCard
 import com.biteguard.core.ui.components.HighlightedRawTextCard
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.SafetyLevelChip
 import com.biteguard.core.ui.components.SafetyVerdictBanner
 import com.biteguard.core.ui.components.VerdictFeedbackRow
+import com.biteguard.core.ui.components.ZoomableImageDialog
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * FR-01 & NFR-NT2: Dietary & Health Profile Configuration Screen with WCAG High-Contrast toggle.
+ * FR-01 & NFR-NT2: Uncluttered Material 3 Dietary & Health Profile Screen with M3 Accordions
+ * for long lists and WCAG High-Contrast toggle.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -90,26 +105,255 @@ fun DietaryProfileScreen(
     modifier: Modifier = Modifier
 ) {
     val semanticColors = LocalBiteGuardSemanticColors.current
+    var editingName by remember(state.profile.userName) { mutableStateOf(false) }
+    var draftName by remember(state.profile.userName) { mutableStateOf(state.profile.userName) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // User Greeting & Guard Summary Header Card
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "Dietary & Allergen Profile",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.semantics { heading() }
-                )
-                Text(
-                    text = "Changes immediately update real-time camera scans and offline fallback rules.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = semanticColors.safe.colorContainer,
+                                contentColor = semanticColors.safe.onColorContainer,
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = if (state.profile.userName.isNotBlank()) {
+                                        "${state.profile.userName}'s Guard Profile"
+                                    } else {
+                                        "Dietary & Allergen Profile"
+                                    },
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.semantics { heading() }
+                                )
+                                Text(
+                                    text = "${state.profile.selectedAllergens.size} Allergen(s) • ${state.profile.healthGoals.size} Health Goal(s)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        TextButton(onClick = { editingName = !editingName }) {
+                            Text(
+                                text = if (editingName) "Cancel" else "Edit Name",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (editingName) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = draftName,
+                                onValueChange = { draftName = it },
+                                singleLine = true,
+                                label = { Text("Your Name") },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = {
+                                    onIntent(ProfileIntent.UpdateUserName(draftName))
+                                    editingName = false
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text("Save", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Severe Allergens Accordion (Expanded by default for fast one-tap access, compact M3 chips)
+        item {
+            BiteGuardAccordion(
+                title = "Severe Allergen Alerts",
+                subtitle = "Triggers immediate DANGER alerts on labels",
+                badgeText = "${state.profile.selectedAllergens.size} active",
+                leadingIcon = Icons.Default.WarningAmber,
+                accentColor = semanticColors.danger.color,
+                initiallyExpanded = true
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Allergen.entries.forEach { allergen ->
+                            val isSelected = allergen in state.profile.selectedAllergens
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onIntent(ProfileIntent.ToggleAllergen(allergen)) },
+                                modifier = Modifier.heightIn(min = 44.dp),
+                                label = {
+                                    Text(
+                                        text = allergen.displayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected"
+                                        )
+                                    }
+                                } else null,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = semanticColors.danger.colorContainer,
+                                    selectedLabelColor = semanticColors.danger.onColorContainer,
+                                    selectedLeadingIconColor = semanticColors.danger.onColorContainer
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = MaterialTheme.colorScheme.outlineVariant,
+                                    selectedBorderColor = semanticColors.danger.color,
+                                    selectedBorderWidth = 2.dp
+                                )
+                            )
+                        }
+                    }
+
+                    // Nested Accordion for Hidden Chemical Derivatives reference list
+                    BiteGuardAccordion(
+                        title = "Common Hidden Derivatives Guide",
+                        subtitle = "See chemical names audited for each allergen",
+                        leadingIcon = Icons.Default.MenuBook,
+                        accentColor = semanticColors.info.color,
+                        initiallyExpanded = false
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Allergen.entries.forEach { allergen ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "${allergen.displayName}: ",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = allergen.examples,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dietary & Health Goals Accordion (FR-01)
+        item {
+            BiteGuardAccordion(
+                title = "Dietary & Health Goals",
+                subtitle = "Flags hidden sugars, sodium & lifestyle conflicts",
+                badgeText = "${state.profile.healthGoals.size} active",
+                leadingIcon = Icons.Default.HealthAndSafety,
+                accentColor = semanticColors.safe.color,
+                initiallyExpanded = true
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HealthGoal.entries.forEach { goal ->
+                        val isSelected = goal in state.profile.healthGoals
+                        val family = if (isSelected) semanticColors.safe else null
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(role = Role.Checkbox) {
+                                    onIntent(ProfileIntent.ToggleHealthGoal(goal))
+                                }
+                                .semantics {
+                                    contentDescription = "${goal.displayName}, ${if (isSelected) "Enabled" else "Disabled"}. ${goal.description}"
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = family?.colorContainer ?: MaterialTheme.colorScheme.surface,
+                            contentColor = family?.onColorContainer ?: MaterialTheme.colorScheme.onSurface,
+                            border = BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = family?.color ?: MaterialTheme.colorScheme.outlineVariant
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = goal.displayName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = goal.description,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Switch(
+                                    checked = isSelected,
+                                    onCheckedChange = { onIntent(ProfileIntent.ToggleHealthGoal(goal)) }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -130,25 +374,25 @@ fun DietaryProfileScreen(
                         .clickable(role = Role.Switch) {
                             onIntent(ProfileIntent.SetHighContrast(!state.profile.highContrastMode))
                         }
-                        .padding(16.dp),
+                        .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.AccessibilityNew,
                         contentDescription = null,
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(26.dp),
                         tint = semanticColors.info.onColorContainer
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Ultra High-Contrast Accessibility Mode",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = semanticColors.info.onColorContainer
                         )
                         Text(
-                            text = "Maximizes WCAG 2.1 AAA contrast ratios and thickens border signage for low-vision & color-blind shoppers.",
+                            text = "Maximizes WCAG 2.1 AAA contrast ratios and thickens border signage.",
                             style = MaterialTheme.typography.bodySmall,
                             color = semanticColors.info.onColorContainer
                         )
@@ -161,188 +405,6 @@ fun DietaryProfileScreen(
             }
         }
 
-        // Severe Allergens Section (FR-01)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WarningAmber,
-                            contentDescription = null,
-                            tint = semanticColors.danger.color
-                        )
-                        Column {
-                            Text(
-                                text = "Severe Allergen Alerts (${state.profile.selectedAllergens.size} active)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.semantics { heading() }
-                            )
-                            Text(
-                                text = "Triggers immediate DANGER alerts when explicit or chemical derivatives are found.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Allergen.entries.forEach { allergen ->
-                            val isSelected = allergen in state.profile.selectedAllergens
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { onIntent(ProfileIntent.ToggleAllergen(allergen)) },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                label = {
-                                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                                        Text(
-                                            text = allergen.displayName,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = allergen.examples,
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    }
-                                },
-                                leadingIcon = if (isSelected) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected"
-                                        )
-                                    }
-                                } else null,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = semanticColors.danger.colorContainer,
-                                    selectedLabelColor = semanticColors.danger.onColorContainer,
-                                    selectedLeadingIconColor = semanticColors.danger.onColorContainer
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = isSelected,
-                                    borderColor = MaterialTheme.colorScheme.outline,
-                                    selectedBorderColor = semanticColors.danger.color,
-                                    selectedBorderWidth = 2.dp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Dietary & Health Goals Section (FR-01)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.HealthAndSafety,
-                            contentDescription = null,
-                            tint = semanticColors.safe.color
-                        )
-                        Column {
-                            Text(
-                                text = "Dietary & Health Goals (${state.profile.healthGoals.size} active)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.semantics { heading() }
-                            )
-                            Text(
-                                text = "Flags hidden sugars, sodium enhancers, and lifestyle/religious dietary conflicts.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HealthGoal.entries.forEach { goal ->
-                            val isSelected = goal in state.profile.healthGoals
-                            val family = if (isSelected) semanticColors.safe else null
-
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable(role = Role.Checkbox) {
-                                        onIntent(ProfileIntent.ToggleHealthGoal(goal))
-                                    }
-                                    .semantics {
-                                        contentDescription = "${goal.displayName}, ${if (isSelected) "Enabled" else "Disabled"}. ${goal.description}"
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = family?.colorContainer ?: MaterialTheme.colorScheme.surface,
-                                contentColor = family?.onColorContainer ?: MaterialTheme.colorScheme.onSurface,
-                                border = BorderStroke(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = family?.color ?: MaterialTheme.colorScheme.outlineVariant
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = goal.displayName,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = goal.description,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Switch(
-                                        checked = isSelected,
-                                        onCheckedChange = { onIntent(ProfileIntent.ToggleHealthGoal(goal)) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         item {
             MedicalDisclaimerBanner()
         }
@@ -350,7 +412,8 @@ fun DietaryProfileScreen(
 }
 
 /**
- * FR-05: Scan History & Encrypted Audit Log Screen with search, SafetyLevel filters, and detail view.
+ * FR-05: Scan History & Encrypted Audit Log Screen with search, SafetyLevel filters,
+ * and M3 Accordion detail view.
  */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -385,7 +448,7 @@ fun ScanHistoryScreen(
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
-                    text = "${state.allHistory.size} saved package audit(s) stored strictly on-device",
+                    text = "${state.allHistory.size} saved audit(s) stored strictly on-device",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -394,7 +457,8 @@ fun ScanHistoryScreen(
             if (state.allHistory.isNotEmpty()) {
                 OutlinedButton(
                     onClick = { onIntent(ProfileIntent.RequestClearHistory(true)) },
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    modifier = Modifier.heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = semanticColors.danger.color
                     ),
@@ -406,7 +470,7 @@ fun ScanHistoryScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Clear All", fontWeight = FontWeight.Bold)
+                    Text("Clear", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -440,13 +504,13 @@ fun ScanHistoryScreen(
             FilterChip(
                 selected = state.selectedSafetyFilter == null,
                 onClick = { onIntent(ProfileIntent.FilterBySafetyLevel(null)) },
-                modifier = Modifier.heightIn(min = 44.dp),
+                modifier = Modifier.heightIn(min = 40.dp),
                 label = { Text("All (${state.allHistory.size})", fontWeight = FontWeight.Bold) },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.FilterList,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             )
@@ -458,7 +522,7 @@ fun ScanHistoryScreen(
                 FilterChip(
                     selected = isSelected,
                     onClick = { onIntent(ProfileIntent.FilterBySafetyLevel(level)) },
-                    modifier = Modifier.heightIn(min = 44.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
                     label = {
                         Text(
                             text = "${level.label} ($count)",
@@ -485,7 +549,7 @@ fun ScanHistoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ),
@@ -501,7 +565,7 @@ fun ScanHistoryScreen(
                     Icon(
                         imageVector = Icons.Default.History,
                         contentDescription = null,
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.size(52.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -529,7 +593,8 @@ fun ScanHistoryScreen(
                     if (state.allHistory.isEmpty()) {
                         Button(
                             onClick = onNavigateToScanner,
-                            modifier = Modifier.heightIn(min = 48.dp)
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Text("Open Label Scanner", fontWeight = FontWeight.Bold)
                         }
@@ -539,7 +604,8 @@ fun ScanHistoryScreen(
                                 onIntent(ProfileIntent.UpdateSearchQuery(""))
                                 onIntent(ProfileIntent.FilterBySafetyLevel(null))
                             },
-                            modifier = Modifier.heightIn(min = 48.dp)
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Text("Reset Search & Filters", fontWeight = FontWeight.Bold)
                         }
@@ -547,11 +613,21 @@ fun ScanHistoryScreen(
                 }
             }
         } else {
+            val latestScan = state.allHistory.firstOrNull()
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
+                if (latestScan != null && state.searchQuery.isBlank() && state.selectedSafetyFilter == null) {
+                    item(key = "latest_featured_${latestScan.id}") {
+                        LatestScannedSpotlightCard(
+                            verdict = latestScan,
+                            formattedDate = dateFormatter.format(latestScan.timestamp),
+                            onInspectDetails = { onIntent(ProfileIntent.SelectVerdictDetail(latestScan)) }
+                        )
+                    }
+                }
                 items(state.filteredHistory, key = { it.id }) { verdict ->
                     HistoryVerdictCard(
                         verdict = verdict,
@@ -563,7 +639,7 @@ fun ScanHistoryScreen(
         }
     }
 
-    // Detail Bottom Sheet
+    // Detail Bottom Sheet with M3 Accordions + Click-to-Zoom Package Photo
     val selectedVerdict = state.selectedVerdictForDetail
     if (selectedVerdict != null) {
         ModalBottomSheet(
@@ -588,10 +664,19 @@ fun ScanHistoryScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Scanned ${dateFormatter.format(selectedVerdict.timestamp)}",
+                        text = "Scanned ${dateFormatter.format(selectedVerdict.timestamp)} • ${selectedVerdict.flaggedIngredients.size} flagged item(s) • TTFT ${selectedVerdict.ttftMs}ms",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (selectedVerdict.snapshotThumbnailBytes != null) {
+                    item {
+                        ClickableCapturedImageCard(
+                            thumbnailBytes = selectedVerdict.snapshotThumbnailBytes,
+                            title = selectedVerdict.productName,
+                            subtitle = "Scanned ${dateFormatter.format(selectedVerdict.timestamp)}"
+                        )
+                    }
                 }
                 item {
                     Text(
@@ -602,25 +687,46 @@ fun ScanHistoryScreen(
                 }
                 if (selectedVerdict.flaggedIngredients.isNotEmpty()) {
                     item {
-                        Text(
-                            text = "Flagged Ingredients (${selectedVerdict.flaggedIngredients.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    items(selectedVerdict.flaggedIngredients) { flag ->
-                        FlaggedIngredientCard(ingredient = flag)
+                        BiteGuardAccordion(
+                            title = "Flagged Ingredients",
+                            subtitle = "Conflict details for this package",
+                            badgeText = "${selectedVerdict.flaggedIngredients.size} flagged",
+                            leadingIcon = Icons.Default.WarningAmber,
+                            accentColor = semanticColors.forSafetyLevel(selectedVerdict.safetyLevel).color,
+                            initiallyExpanded = true
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                selectedVerdict.flaggedIngredients.forEach { flag ->
+                                    FlaggedIngredientCard(ingredient = flag)
+                                }
+                            }
+                        }
                     }
                 }
                 item {
-                    val highlights = remember(selectedVerdict, state.profile) {
-                        LocalFallbackAuditEngine.extractHighlightTerms(selectedVerdict, state.profile)
+                    val highlights by produceState(
+                        initialValue = emptyList(),
+                        key1 = selectedVerdict,
+                        key2 = state.profile
+                    ) {
+                        value = withContext(Dispatchers.Default) {
+                            LocalFallbackAuditEngine.extractHighlightTerms(selectedVerdict, state.profile)
+                        }
                     }
-                    HighlightedRawTextCard(
-                        rawText = selectedVerdict.rawExtractedText,
-                        highlightedKeywords = highlights
-                    )
+                    BiteGuardAccordion(
+                        title = "Extracted OCR Text & Disclaimer",
+                        subtitle = "Raw package text and medical notice",
+                        leadingIcon = Icons.Default.Description,
+                        initiallyExpanded = false
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HighlightedRawTextCard(
+                                rawText = selectedVerdict.rawExtractedText,
+                                highlightedKeywords = highlights
+                            )
+                            MedicalDisclaimerBanner()
+                        }
+                    }
                 }
                 item {
                     VerdictFeedbackRow(
@@ -631,9 +737,6 @@ fun ScanHistoryScreen(
                             onIntent(ProfileIntent.SubmitVerdictFeedback(selectedVerdict, fb))
                         }
                     )
-                }
-                item {
-                    MedicalDisclaimerBanner()
                     Spacer(modifier = Modifier.height(20.dp))
                 }
             }
@@ -670,6 +773,107 @@ fun ScanHistoryScreen(
     }
 }
 
+/**
+ * Spotlight card at the top of the Audit Log displaying the most recent scanned image (with click-to-zoom),
+ * safety verdict, flagged count, and a quick button to open full details.
+ */
+@Composable
+private fun LatestScannedSpotlightCard(
+    verdict: AuditVerdict,
+    formattedDate: String,
+    onInspectDetails: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val semanticColors = LocalBiteGuardSemanticColors.current
+    val family = semanticColors.forSafetyLevel(verdict.safetyLevel)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        border = BorderStroke(2.dp, family.color)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = family.colorContainer,
+                    contentColor = family.onColorContainer
+                ) {
+                    Text(
+                        text = "LATEST SCANNED PACKAGE",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+                Text(
+                    text = formattedDate,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (verdict.snapshotThumbnailBytes != null) {
+                ClickableCapturedImageCard(
+                    thumbnailBytes = verdict.snapshotThumbnailBytes,
+                    title = verdict.productName,
+                    subtitle = "Latest scan • $formattedDate"
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = verdict.productName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "${verdict.flaggedIngredients.size} flagged ingredient(s) • ${if (verdict.isOfflineFallback) "Local Engine" else "Cloud AI"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                SafetyLevelChip(safetyLevel = verdict.safetyLevel)
+            }
+
+            Text(
+                text = verdict.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3
+            )
+
+            OutlinedButton(
+                onClick = onInspectDetails,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 42.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("View Full Audit Details & OCR Text", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 @Composable
 private fun HistoryVerdictCard(
     verdict: AuditVerdict,
@@ -679,10 +883,21 @@ private fun HistoryVerdictCard(
 ) {
     val semanticColors = LocalBiteGuardSemanticColors.current
     val family = semanticColors.forSafetyLevel(verdict.safetyLevel)
+    var showZoomDialog by remember { mutableStateOf(false) }
 
-    val thumbnailBitmap = remember(verdict.snapshotThumbnailBytes) {
-        verdict.snapshotThumbnailBytes?.let { bytes ->
-            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+    val thumbnailBitmap by produceState<ImageBitmap?>(
+        initialValue = null,
+        key1 = verdict.snapshotThumbnailBytes
+    ) {
+        val bytes = verdict.snapshotThumbnailBytes
+        value = if (bytes != null) {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }.getOrNull()
+            }
+        } else {
+            null
         }
     }
 
@@ -694,7 +909,7 @@ private fun HistoryVerdictCard(
                 role = Role.Button
                 contentDescription = "${verdict.productName}, verdict ${verdict.safetyLevel.label}, scanned on $formattedDate. ${verdict.summary}"
             },
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
@@ -704,21 +919,23 @@ private fun HistoryVerdictCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (thumbnailBitmap != null) {
+            val loadedThumbnail = thumbnailBitmap
+            if (loadedThumbnail != null) {
                 Image(
-                    bitmap = thumbnailBitmap.asImageBitmap(),
-                    contentDescription = "Snapshot thumbnail of scanned label",
+                    bitmap = loadedThumbnail,
+                    contentDescription = "Snapshot thumbnail of scanned label. Tap to zoom.",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(64.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { showZoomDialog = true }
                 )
             } else {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = family.colorContainer,
                     contentColor = family.onColorContainer,
                     modifier = Modifier.size(64.dp)
@@ -735,7 +952,7 @@ private fun HistoryVerdictCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -764,15 +981,24 @@ private fun HistoryVerdictCard(
                     maxLines = 2
                 )
 
-                if (verdict.flaggedIngredients.isNotEmpty()) {
-                    Text(
-                        text = "Flagged: " + verdict.flaggedIngredients.joinToString(", ") { it.name },
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = family.color
-                    )
-                }
+                Text(
+                    text = "${verdict.flaggedIngredients.size} flagged • Tap card for details${if (loadedThumbnail != null) " • Tap photo to zoom" else ""}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
+
+    val loadedThumbnail = thumbnailBitmap
+    if (showZoomDialog && loadedThumbnail != null) {
+        ZoomableImageDialog(
+            imageBitmap = loadedThumbnail,
+            title = verdict.productName,
+            subtitle = "Scanned $formattedDate",
+            onDismiss = { showZoomDialog = false }
+        )
+    }
 }
+

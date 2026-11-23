@@ -196,4 +196,39 @@ class BiteGuardMainFeatureUiTest {
             capturedIntents.last()
         )
     }
+
+    /**
+     * UI Use Case 5: Two-step Onboarding Flow allows entering user's name on Welcome Screen
+     * with Robot Lottie and selecting allergies on Pick Allergies Screen.
+     */
+    @Test
+    fun useCase5_twoStepOnboardingFlowSavesUserNameAndAllergens() {
+        var completedName = ""
+        var completedAllergens: Set<Allergen> = emptySet()
+
+        composeTestRule.setContent {
+            BiteGuardAITheme(highContrast = false) {
+                com.example.biteguardai.ui.onboarding.BiteGuardOnboardingFlow(
+                    initialName = "Akmal",
+                    initialAllergens = emptySet(),
+                    initialHealthGoals = emptySet(),
+                    onCompleteOnboarding = { name, allergens, _ ->
+                        completedName = name
+                        completedAllergens = allergens
+                    }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Welcome to BiteGuard AI").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Ready to make every bite safer and healthier?").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Continue to Allergen Setup").performClick()
+
+        composeTestRule.onNodeWithText("Hi Akmal, pick your allergies").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Peanuts").performClick()
+        composeTestRule.onNodeWithText("Start Guarding (1)").performClick()
+
+        assertEquals("Akmal", completedName)
+        assertTrue(Allergen.PEANUTS in completedAllergens)
+    }
 }
