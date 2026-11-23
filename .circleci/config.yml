@@ -1,31 +1,244 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine.
-# See: https://circleci.com/docs/reference/configuration-reference/
 version: 2.1
 
-# Define a job to be invoked later in a workflow.
-# See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#jobs-overview & https://circleci.com/docs/reference/configuration-reference/#jobs
-jobs:
-  say-hello:
-    # Specify the execution environment. You can specify an image from Docker Hub or use one of our convenience images from CircleCI's Developer Hub.
-    # See: https://circleci.com/docs/guides/execution-managed/executor-intro/ & https://circleci.com/docs/reference/configuration-reference/#executor-job
-    docker:
-      # Specify the version you desire here
-      # See: https://circleci.com/developer/images/image/cimg/base
-      - image: cimg/base:current
+parameters:
+  run_rollback:
+    type: boolean
+    default: false
+    description: "Trigger the Emergency Rollback Pipeline to restore a known-good release"
+  rollback_target_tag:
+    type: string
+    default: ""
+    description: "Target git tag to restore during emergency rollback"
+  rollback_reason:
+    type: string
+    default: "Emergency safety rollback initiated via CircleCI"
+    description: "Reason for rollback"
 
-    # Add steps to the job
-    # See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#steps-overview & https://circleci.com/docs/reference/configuration-reference/#steps
+orbs:
+  android: circleci/android@2.5.0
+
+# ------------------------------------------------------------------------------
+# Reusable Commands
+# ------------------------------------------------------------------------------
+commands:
+  setup-environment:
+    description: "Configures bash script permissions and release keystore credentials if provided"
     steps:
-      # Checkout the code as the first step.
-      - checkout
       - run:
-          name: "Say hello"
-          command: "echo Hello, World!"
+          name: Setup Script Permissions & Release Credentials
+          command: |
+            chmod +x ./scripts/*.sh
+            if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ]; then
+              echo "Decoding production release keystore from CI secrets..."
+              echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+              echo "export RELEASE_KEYSTORE_PATH=app/release.keystore" >> "$BASH_ENV"
+            else
+              echo "No RELEASE_KEYSTORE_BASE64 secret found; using CI release fallback."
+            fi
 
-# Orchestrate jobs using workflows
-# See: https://circleci.com/docs/guides/orchestrate/workflows/ & https://circleci.com/docs/reference/configuration-reference/#workflows
+  collect-test-metrics:
+    description: "Aggregates JUnit XML and HTML test reports for CircleCI dashboards across all features"
+    steps:
+      - run:
+          name: Collect JUnit XML Test Results & HTML Reports for Overall Features
+          when: always
+          command: |
+            mkdir -p /tmp/test-results/junit
+            mkdir -p /tmp/test-artifacts/reports
+            find . -path "*/build/test-results/testDebugUnitTest/*.xml" -exec cp {} /tmp/test-results/junit/ \;
+            find . -path "*/build/test-results/test/*.xml" -exec cp {} /tmp/test-results/junit/ \;
+            cp -r app/build/reports/tests /tmp/test-artifacts/reports/app-tests || true
+            cp -r core/data/build/reports/tests /tmp/test-artifacts/reports/core-data-tests || true
+            cp -r feature/scanner/build/reports/tests /tmp/test-artifacts/reports/feature-scanner-tests || true
+            cp -r feature/profile/build/reports/tests /tmp/test-artifacts/reports/feature-profile-tests || true
+      - store_test_results:
+          path: /tmp/test-results
+      - store_artifacts:
+          path: /tmp/test-artifacts/reports
+          destination: test-reports
+
+# ------------------------------------------------------------------------------
+# Jobs
+# ------------------------------------------------------------------------------
+jobs:
+  # 1. Verification & Testing: Runs on every commit and PR across all features
+  verify-and-test:
+    executor:
+      name: android/android-machine
+      resource-class: large
+      tag: default
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Run Modular JVM Unit Use-Case Tests & Koin Graph Verification (NFR-T6)
+          command: ./gradlew testDebugUnitTest :core:model:test --stacktrace
+      - run:
+          name: Compile Instrumentation UI Tests & Debug APK (NFR-T6)
+          command: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - collect-test-metrics
+      - store_artifacts:
+          path: app/build/outputs/apk/debug
+          destination: debug-apk
+
+  # 2. Release Build & Quality Gate Validation: Enforces pre-deploy verification
+  build-and-validate-release:
+    executor:
+      name: android/android-machine
+      resource-class: large
+      tag: default
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Build Production Release AAB & APK with R8 Optimization
+          command: ./gradlew :app:bundleRelease :app:assembleRelease --stacktrace
+      - run:
+          name: Execute Automated Release Validation Gate
+          command: ./scripts/validate_release.sh
+      - store_artifacts:
+          path: build/reports/release-validation
+          destination: release-validation-report
+      - store_artifacts:
+          path: app/build/outputs/mapping/release
+          destination: r8-mapping-files
+      - persist_to_workspace:
+          root: .
+          paths:
+            - app/build/outputs/bundle/release
+            - app/build/outputs/apk/release
+            - app/build/outputs/mapping/release
+            - build/reports/release-validation
+            - scripts
+
+  # 3. Deploy to Internal Track & Emit Deploy Marker
+  deploy-internal:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Register Internal Track Deploy Marker & Telemetry
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env internal \
+              --status DEPLOYED \
+              --reason "Automated CI/CD build deployment to Internal Testing Track"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-internal
+      - store_artifacts:
+          path: app/build/outputs/bundle/release/app-release.aab
+          destination: release-bundle-internal
+
+  # 4. Production Promotion: Deploys verified release to Production & emits Production Deploy Marker
+  deploy-production:
+    executor:
+      name: android/android-machine
+      resource-class: medium
+      tag: default
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - setup-environment
+      - run:
+          name: Register Production Deploy Marker & Notify Release Channels
+          command: |
+            ./scripts/deploy_marker.sh \
+              --env production \
+              --status DEPLOYED \
+              --reason "Production release promoted following manual signoff and safety validation"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: deploy-markers-production
+      - store_artifacts:
+          path: app/build/outputs/bundle/release/app-release.aab
+          destination: production-release-bundle
+
+  # 5. Emergency Rollback Pipeline: Rolls back to known-good release & logs ROLLED_BACK deploy marker
+  rollback-production:
+    executor:
+      name: android/android-machine
+      resource-class: large
+      tag: default
+    parameters:
+      rollback_tag:
+        type: string
+        default: ""
+        description: "Git release tag to restore (leave blank for latest known-good release)"
+      rollback_reason:
+        type: string
+        default: "Emergency safety rollback initiated via CircleCI"
+        description: "Reason for rollback (medical disclaimer / safety / crash)"
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Execute Emergency Rollback & Emit Rollback Deploy Marker
+          command: |
+            ./scripts/rollback_release.sh \
+              --env production \
+              --reason "<< parameters.rollback_reason >>" \
+              --tag "<< parameters.rollback_tag >>"
+      - store_artifacts:
+          path: build/deploy-markers
+          destination: rollback-deploy-markers
+      - store_artifacts:
+          path: app/build/outputs/bundle/release
+          destination: rollback-artifacts
+
+# ------------------------------------------------------------------------------
+# Workflows
+# ------------------------------------------------------------------------------
 workflows:
-  say-hello-workflow: # This is the name of the workflow, feel free to change it to better match your workflow.
-    # Inside the workflow, you define the jobs you want to run.
+  version: 2
+
+  # Standard CI/CD Delivery Pipeline with Promotion Gate
+  biteguard-delivery:
     jobs:
-      - say-hello
+      - verify-and-test
+      - build-and-validate-release:
+          requires:
+            - verify-and-test
+      - deploy-internal:
+          requires:
+            - build-and-validate-release
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - approve-production-release:
+          type: approval
+          requires:
+            - deploy-internal
+          filters:
+            branches:
+              only:
+                - main
+                - master
+                - circleci-project-setup
+                - /release\/.*/
+      - deploy-production:
+          requires:
+            - approve-production-release
+
+  # Dedicated On-Demand / Manual Emergency Rollback Pipeline
+  emergency-rollback:
+    when: << pipeline.parameters.run_rollback >>
+    jobs:
+      - approve-rollback-execution:
+          type: approval
+      - rollback-production:
+          requires:
+            - approve-rollback-execution
+          rollback_tag: << pipeline.parameters.rollback_target_tag >>
+          rollback_reason: << pipeline.parameters.rollback_reason >>
