@@ -27,8 +27,13 @@ data class ProfileAndHistoryUiState(
     val searchQuery: String = "",
     val selectedSafetyFilter: SafetyLevel? = null,
     val selectedVerdictForDetail: AuditVerdict? = null,
-    val showClearConfirmation: Boolean = false
-)
+    val showClearConfirmation: Boolean = false,
+    val selectedIdsForBulkDelete: Set<String> = emptySet(),
+    val showBulkDeleteConfirmation: Boolean = false
+) {
+    val isSelectionMode: Boolean
+        get() = selectedIdsForBulkDelete.isNotEmpty()
+}
 
 sealed interface ProfileIntent {
     data class UpdateUserName(val name: String) : ProfileIntent
@@ -41,7 +46,22 @@ sealed interface ProfileIntent {
     data class SubmitVerdictFeedback(val verdict: AuditVerdict, val feedback: UserFeedback) : ProfileIntent
     data class RequestClearHistory(val show: Boolean) : ProfileIntent
     data object ConfirmClearHistory : ProfileIntent
+
+    // Bulk deletion & Multi-select intents
+    data class StartSelectionMode(val initialVerdictId: String) : ProfileIntent
+    data class ToggleSelectVerdict(val verdictId: String) : ProfileIntent
+    data object SelectAllFilteredVerdicts : ProfileIntent
+    data object ClearSelectionMode : ProfileIntent
+    data class RequestBulkDelete(val show: Boolean) : ProfileIntent
+    data object ConfirmBulkDelete : ProfileIntent
 }
+
+private data class SelectionDialogState(
+    val selectedId: String?,
+    val showClear: Boolean,
+    val selectedIds: Set<String>,
+    val showBulkDelete: Boolean
+)
 
 class ProfileViewModel(
     private val profileRepository: ProfileRepository,
@@ -53,14 +73,25 @@ class ProfileViewModel(
     private val safetyFilterFlow = MutableStateFlow<SafetyLevel?>(null)
     private val selectedVerdictIdFlow = MutableStateFlow<String?>(null)
     private val showClearConfirmFlow = MutableStateFlow(false)
+    private val selectedIdsFlow = MutableStateFlow<Set<String>>(emptySet())
+    private val showBulkDeleteConfirmFlow = MutableStateFlow(false)
+
+    private val selectionStateFlow = combine(
+        selectedVerdictIdFlow,
+        showClearConfirmFlow,
+        selectedIdsFlow,
+        showBulkDeleteConfirmFlow
+    ) { selectedId, showClear, selectedIds, showBulkDelete ->
+        SelectionDialogState(selectedId, showClear, selectedIds, showBulkDelete)
+    }
 
     val uiState: StateFlow<ProfileAndHistoryUiState> = combine(
         profileRepository.userProfileFlow,
         auditRepository.scanHistoryFlow,
         searchQueryFlow,
         safetyFilterFlow,
-        combine(selectedVerdictIdFlow, showClearConfirmFlow) { id, showClear -> id to showClear }
-    ) { profile, history, query, safetyFilter, (selectedId, showClear) ->
+        selectionStateFlow
+    ) { profile, history, query, safetyFilter, selState ->
         val filtered = if (query.isBlank() && safetyFilter == null) {
             history
         } else {
@@ -86,8 +117,10 @@ class ProfileViewModel(
             filteredHistory = filtered,
             searchQuery = query,
             selectedSafetyFilter = safetyFilter,
-            selectedVerdictForDetail = history.firstOrNull { it.id == selectedId },
-            showClearConfirmation = showClear
+            selectedVerdictForDetail = history.firstOrNull { it.id == selState.selectedId },
+            showClearConfirmation = selState.showClear,
+            selectedIdsForBulkDelete = selState.selectedIds,
+            showBulkDeleteConfirmation = selState.showBulkDelete
         )
     }.stateIn(
         scope = viewModelScope,
@@ -127,7 +160,42 @@ class ProfileViewModel(
             ProfileIntent.ConfirmClearHistory -> viewModelScope.launch {
                 showClearConfirmFlow.value = false
                 selectedVerdictIdFlow.value = null
+                selectedIdsFlow.value = emptySet()
                 auditRepository.clearScanHistory()
+            }
+            is ProfileIntent.StartSelectionMode -> {
+                selectedIdsFlow.value = setOf(intent.initialVerdictId)
+            }
+            is ProfileIntent.ToggleSelectVerdict -> {
+                val current = selectedIdsFlow.value
+                selectedIdsFlow.value = if (intent.verdictId in current) {
+                    current - intent.verdictId
+                } else {
+                    current + intent.verdictId
+                }
+            }
+            ProfileIntent.SelectAllFilteredVerdicts -> {
+                val currentFiltered = uiState.value.filteredHistory
+                selectedIdsFlow.value = if (selectedIdsFlow.value.size == currentFiltered.size && currentFiltered.isNotEmpty()) {
+                    emptySet()
+                } else {
+                    currentFiltered.map { it.id }.toSet()
+                }
+            }
+            ProfileIntent.ClearSelectionMode -> {
+                selectedIdsFlow.value = emptySet()
+                showBulkDeleteConfirmFlow.value = false
+            }
+            is ProfileIntent.RequestBulkDelete -> {
+                showBulkDeleteConfirmFlow.value = intent.show
+            }
+            ProfileIntent.ConfirmBulkDelete -> viewModelScope.launch {
+                val idsToDelete = selectedIdsFlow.value.toList()
+                selectedIdsFlow.value = emptySet()
+                showBulkDeleteConfirmFlow.value = false
+                if (idsToDelete.isNotEmpty()) {
+                    auditRepository.deleteVerdicts(idsToDelete)
+                }
             }
         }
     }

@@ -99,7 +99,7 @@ class EdgeTextAnalyzer(
                 val visionText = recognizer.process(inputImage).await()
                 val latencyMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1L)
 
-                val boxes = visionText.textBlocks.mapNotNull { block ->
+                val rawBoxes = visionText.textBlocks.mapNotNull { block ->
                     val rect = block.boundingBox ?: return@mapNotNull null
                     val blockText = block.text.trim()
                     if (blockText.isEmpty()) return@mapNotNull null
@@ -109,6 +109,9 @@ class EdgeTextAnalyzer(
                         containsIngredientKeyword = containsStructuralKeyword(blockText)
                     )
                 }
+
+                // Spatial Paragraph Clustering: Merge adjacent/stacked lines into cohesive paragraph blocks
+                val boxes = clusterTextBoxes(rawBoxes)
 
                 val fullText = visionText.text.trim()
                 val isReady = boxes.any { it.containsIngredientKeyword } || containsStructuralKeyword(fullText)
@@ -180,6 +183,118 @@ class EdgeTextAnalyzer(
             if (text.isBlank()) return false
             val lower = text.lowercase()
             return STRUCTURAL_KEYWORDS.any { kw -> lower.contains(kw) }
+        }
+
+        private fun unionRects(a: Rect, b: Rect): Rect {
+            return Rect().apply {
+                left = minOf(a.left, b.left)
+                top = minOf(a.top, b.top)
+                right = maxOf(a.right, b.right)
+                bottom = maxOf(a.bottom, b.bottom)
+            }
+        }
+
+        /**
+         * Clusters fragmented ML Kit text blocks into wider paragraph-level containers.
+         * Reduces visual clutter on screen and enables 1-tap capture of entire ingredient sections.
+         *
+         * Mitigation: If clustering produces an empty result or fails, safely returns the raw input boxes.
+         */
+        fun clusterTextBoxes(rawBoxes: List<DetectedTextBox>): List<DetectedTextBox> {
+            if (rawBoxes.size <= 1) return rawBoxes
+
+            return try {
+                // 1. Filter out stray micro-noise (e.g. isolated punctuation or single non-alphanumeric chars)
+                val validBoxes = rawBoxes.filter { box ->
+                    val trimmed = box.text.trim()
+                    trimmed.isNotEmpty() && (trimmed.length > 1 || trimmed[0].isLetterOrDigit())
+                }
+                if (validBoxes.size <= 1) return validBoxes.ifEmpty { rawBoxes }
+
+                // 2. Sort by vertical top position primarily (snapped to 12px grid) then left
+                val sorted = validBoxes.sortedWith(
+                    compareBy<DetectedTextBox> { it.boundingBox.top / 12 }
+                        .thenBy { it.boundingBox.left }
+                )
+
+                val clusters = mutableListOf<MutableList<DetectedTextBox>>()
+
+                for (box in sorted) {
+                    val bRect = box.boundingBox
+                    val bHeight = bRect.bottom - bRect.top
+                    val bCenterX = (bRect.left + bRect.right) / 2
+
+                    // Find a cluster this box can merge into
+                    val matchingCluster = clusters.firstOrNull { cluster ->
+                        val clusterRect = cluster.fold(cluster.first().boundingBox) { acc, item ->
+                            unionRects(acc, item.boundingBox)
+                        }
+                        val clusterHeight = clusterRect.bottom - clusterRect.top
+                        val clusterCenterX = (clusterRect.left + clusterRect.right) / 2
+
+                        // Check horizontal overlap
+                        val horizontalOverlap = maxOf(0, minOf(clusterRect.right, bRect.right) - maxOf(clusterRect.left, bRect.left))
+                        val horizontalGap = maxOf(0, bRect.left - clusterRect.right)
+                        val sharesColumn = abs(clusterRect.left - bRect.left) < 60 || abs(clusterCenterX - bCenterX) < 80
+                        val hasHorizontalAffinity = horizontalOverlap > 0 || sharesColumn
+
+                        // Check vertical overlap or vertical gap
+                        val verticalOverlap = maxOf(0, minOf(clusterRect.bottom, bRect.bottom) - maxOf(clusterRect.top, bRect.top))
+                        val verticalGap = bRect.top - clusterRect.bottom
+                        val avgLineHeight = (bHeight + clusterHeight) / (cluster.size + 1)
+                        val maxAllowedGap = maxOf(48, (avgLineHeight * 1.6).toInt())
+
+                        // Case 1: Same horizontal line (horizontal gap <= 40px and vertical overlap > 0)
+                        val isSameLineContinuation = verticalOverlap > 0 && horizontalGap <= 40
+
+                        // Case 2: Vertically stacked paragraph line (horizontal affinity and vertical gap in reasonable range)
+                        val isVerticallyStackedParagraph = hasHorizontalAffinity && verticalGap in -24..maxAllowedGap
+
+                        // Case 3: Keyword anchor affinity (contains "Ingredients" or "Contains", pull adjacent text)
+                        val isKeywordAffinity = (cluster.any { it.containsIngredientKeyword } || box.containsIngredientKeyword) &&
+                            hasHorizontalAffinity && verticalGap in -24..maxOf(72, avgLineHeight * 2)
+
+                        isSameLineContinuation || isVerticallyStackedParagraph || isKeywordAffinity
+                    }
+
+                    if (matchingCluster != null) {
+                        matchingCluster.add(box)
+                    } else {
+                        clusters.add(mutableListOf(box))
+                    }
+                }
+
+                val clusteredBoxes = clusters.map { cluster ->
+                    if (cluster.size == 1) {
+                        cluster.first()
+                    } else {
+                        val unionRect = cluster.fold(cluster.first().boundingBox) { acc, item ->
+                            unionRects(acc, item.boundingBox)
+                        }
+                        // Sort items in top-to-bottom, left-to-right reading order
+                        val sortedItems = cluster.sortedWith(
+                            compareBy<DetectedTextBox> { it.boundingBox.top / 10 }
+                                .thenBy { it.boundingBox.left }
+                        )
+                        val mergedText = sortedItems.joinToString("\n") { it.text.trim() }
+                        val hasKeyword = cluster.any { it.containsIngredientKeyword } || containsStructuralKeyword(mergedText)
+
+                        DetectedTextBox(
+                            text = mergedText,
+                            boundingBox = unionRect,
+                            containsIngredientKeyword = hasKeyword
+                        )
+                    }
+                }
+
+                clusteredBoxes.ifEmpty { rawBoxes }
+            } catch (t: Throwable) {
+                // Mitigation: on any unexpected spatial error, safely fallback to raw boxes
+                runCatching {
+                    android.util.Log.w(TAG, "Clustering fallback to raw boxes: [${t::class.java.simpleName}] ${t.message}")
+                }
+                rawBoxes
+            }
         }
     }
 }

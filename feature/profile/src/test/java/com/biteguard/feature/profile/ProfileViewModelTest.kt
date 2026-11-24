@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -125,6 +126,71 @@ class ProfileViewModelTest {
             val searched = awaitItem()
             assertEquals(1, searched.filteredHistory.size)
             assertEquals(SafetyLevel.SAFE, searched.filteredHistory.first().safetyLevel)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `multi-select and bulk delete removes only selected scan items`() = runTest {
+        val verdict1 = LocalFallbackAuditEngine.evaluateOffline(
+            rawText = "Granola Bar\nIngredients: Oats, Arachis Oil, Whey.",
+            profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
+        )
+        val verdict2 = LocalFallbackAuditEngine.evaluateOffline(
+            rawText = "Sparkling Water\nIngredients: Carbonated Water, Lemon Extract.",
+            profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
+        )
+        val verdict3 = LocalFallbackAuditEngine.evaluateOffline(
+            rawText = "Cookies\nIngredients: Flour, Sugar, Butter.",
+            profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
+        )
+
+        val profileRepo = InMemoryProfileRepository()
+        val auditLog = InMemoryAuditLogDataSource(listOf(verdict1, verdict2, verdict3))
+        val auditRepo = DefaultAuditRepository(
+            aiStreamDataSource = object : AiStreamDataSource {
+                override val isApiKeyConfigured: Boolean = false
+                override fun streamLabelAudit(
+                    rawExtractedText: String,
+                    profile: UserDietaryProfile,
+                    frameBitmap: Bitmap?
+                ): Flow<String> = emptyFlow()
+            },
+            auditLogDataSource = auditLog
+        )
+
+        val viewModel = ProfileViewModel(profileRepo, auditRepo, testDispatcher)
+
+        viewModel.uiState.test {
+            val initial = awaitItem()
+            assertEquals(3, initial.allHistory.size)
+            assertFalse(initial.isSelectionMode)
+
+            // Start selection mode with verdict1
+            viewModel.onIntent(ProfileIntent.StartSelectionMode(verdict1.id))
+            val sel1 = awaitItem()
+            assertTrue(sel1.isSelectionMode)
+            assertEquals(setOf(verdict1.id), sel1.selectedIdsForBulkDelete)
+
+            // Toggle select verdict2
+            viewModel.onIntent(ProfileIntent.ToggleSelectVerdict(verdict2.id))
+            val sel2 = awaitItem()
+            assertEquals(setOf(verdict1.id, verdict2.id), sel2.selectedIdsForBulkDelete)
+
+            // Request bulk delete
+            viewModel.onIntent(ProfileIntent.RequestBulkDelete(true))
+            val dialogState = awaitItem()
+            assertTrue(dialogState.showBulkDeleteConfirmation)
+
+            // Confirm bulk delete
+            viewModel.onIntent(ProfileIntent.ConfirmBulkDelete)
+            var afterDelete = awaitItem()
+            while (afterDelete.allHistory.size != 1) {
+                afterDelete = awaitItem()
+            }
+            assertEquals(1, afterDelete.allHistory.size)
+            assertEquals(verdict3.id, afterDelete.allHistory.first().id)
+            assertFalse(afterDelete.isSelectionMode)
             cancelAndIgnoreRemainingEvents()
         }
     }

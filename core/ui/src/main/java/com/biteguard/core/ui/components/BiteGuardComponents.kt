@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import android.graphics.Rect
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,9 +36,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
@@ -82,11 +86,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -103,7 +110,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
@@ -554,11 +563,13 @@ fun ActionableFailureCard(
 
 /**
  * Itemized FlaggedIngredient row with multimodal severity badge (FR-03 & NFR-NT2).
+ * Supports optional [badgeNumber] that corresponds to clustered highlight boxes on the package image.
  */
 @Composable
 fun FlaggedIngredientCard(
     ingredient: FlaggedIngredient,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    badgeNumber: Int? = null
 ) {
     val semanticColors = LocalBiteGuardSemanticColors.current
     val (family, icon) = when (ingredient.severity) {
@@ -585,14 +596,34 @@ fun FlaggedIngredientCard(
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = family.onColorContainer,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .size(22.dp)
-            )
+            if (badgeNumber != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = family.color,
+                    contentColor = family.onColor,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .padding(top = 1.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "$badgeNumber",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = family.onColor
+                        )
+                    }
+                }
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = family.onColorContainer,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .size(22.dp)
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1235,14 +1266,27 @@ fun OfflineModelLottieAlertDialog(
 }
 
 /**
+ * Represents a highlighted allergen or warning cluster projected onto the captured package image.
+ */
+data class ImageHighlightBox(
+    val index: Int,
+    val label: String,
+    val boundingBox: Rect,
+    val color: Color
+)
+
+/**
  * Interactive full-screen Click-to-Zoom & Pinch-to-Zoom Dialog for inspecting captured package photos
- * in the Audit Log and Audit Result screens.
+ * in the Audit Log and Audit Result screens, with optional numbered allergen/warning highlight boxes.
  */
 @Composable
 fun ZoomableImageDialog(
     imageBitmap: ImageBitmap,
     title: String,
     subtitle: String? = null,
+    highlightBoxes: List<ImageHighlightBox> = emptyList(),
+    imageWidth: Int = 1080,
+    imageHeight: Int = 1920,
     onDismiss: () -> Unit
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
@@ -1342,10 +1386,7 @@ fun ZoomableImageDialog(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Image(
-                        bitmap = imageBitmap,
-                        contentDescription = "Zoomable package image for $title",
-                        contentScale = ContentScale.Fit,
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer(
@@ -1353,8 +1394,79 @@ fun ZoomableImageDialog(
                                 scaleY = scale,
                                 translationX = offsetX,
                                 translationY = offsetY
-                            )
-                    )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap = imageBitmap,
+                            contentDescription = "Zoomable package image for $title",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (highlightBoxes.isNotEmpty()) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val imgW = imageWidth.toFloat().coerceAtLeast(1f)
+                                val imgH = imageHeight.toFloat().coerceAtLeast(1f)
+                                val scaleFactor = minOf(size.width / imgW, size.height / imgH)
+                                val oX = (size.width - imgW * scaleFactor) / 2f
+                                val oY = (size.height - imgH * scaleFactor) / 2f
+
+                                highlightBoxes.forEach { box ->
+                                    val left = box.boundingBox.left * scaleFactor + oX
+                                    val top = box.boundingBox.top * scaleFactor + oY
+                                    val right = box.boundingBox.right * scaleFactor + oX
+                                    val bottom = box.boundingBox.bottom * scaleFactor + oY
+                                    val rectSize = Size((right - left).coerceAtLeast(24f), (bottom - top).coerceAtLeast(16f))
+
+                                    drawRoundRect(
+                                        color = box.color.copy(alpha = 0.28f),
+                                        topLeft = Offset(left, top),
+                                        size = rectSize,
+                                        cornerRadius = CornerRadius(8f, 8f)
+                                    )
+                                    drawRoundRect(
+                                        color = box.color,
+                                        topLeft = Offset(left, top),
+                                        size = rectSize,
+                                        cornerRadius = CornerRadius(8f, 8f),
+                                        style = Stroke(width = 4f)
+                                    )
+                                }
+                            }
+
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val imgW = imageWidth.toFloat().coerceAtLeast(1f)
+                                val imgH = imageHeight.toFloat().coerceAtLeast(1f)
+                                val scaleFactor = minOf(maxWidth.value / imgW, maxHeight.value / imgH)
+                                val oX = (maxWidth.value - imgW * scaleFactor) / 2f
+                                val oY = (maxHeight.value - imgH * scaleFactor) / 2f
+
+                                highlightBoxes.forEach { box ->
+                                    val badgeX = (box.boundingBox.left * scaleFactor + oX - 8f).coerceAtLeast(4f)
+                                    val badgeY = (box.boundingBox.top * scaleFactor + oY - 8f).coerceAtLeast(4f)
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = box.color,
+                                        contentColor = Color.White,
+                                        border = BorderStroke(1.5.dp, Color.White),
+                                        modifier = Modifier
+                                            .offset(x = badgeX.dp, y = badgeY.dp)
+                                            .size(24.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "${box.index}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Row(
@@ -1378,7 +1490,8 @@ fun ZoomableImageDialog(
 }
 
 /**
- * Reusable card showing a captured package snapshot with a "Tap to Zoom" badge overlay.
+ * Reusable card showing a captured package snapshot with a "Tap to Zoom" badge overlay
+ * and optional numbered colored highlight clusters mapped directly to flagged allergens.
  * Decodes byte arrays on `Dispatchers.Default` and opens [ZoomableImageDialog] when clicked.
  */
 @Composable
@@ -1386,6 +1499,9 @@ fun ClickableCapturedImageCard(
     thumbnailBytes: ByteArray?,
     title: String,
     subtitle: String? = null,
+    highlightBoxes: List<ImageHighlightBox> = emptyList(),
+    imageWidth: Int = 1080,
+    imageHeight: Int = 1920,
     modifier: Modifier = Modifier
 ) {
     val decodedBitmap by produceState<ImageBitmap?>(
@@ -1422,7 +1538,7 @@ fun ClickableCapturedImageCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(176.dp)
+                .height(184.dp)
         ) {
             Image(
                 bitmap = bitmap,
@@ -1430,6 +1546,69 @@ fun ClickableCapturedImageCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+
+            if (highlightBoxes.isNotEmpty()) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val imgW = imageWidth.toFloat().coerceAtLeast(1f)
+                    val imgH = imageHeight.toFloat().coerceAtLeast(1f)
+                    val scale = maxOf(size.width / imgW, size.height / imgH)
+                    val offsetX = (size.width - imgW * scale) / 2f
+                    val offsetY = (size.height - imgH * scale) / 2f
+
+                    highlightBoxes.forEach { box ->
+                        val left = box.boundingBox.left * scale + offsetX
+                        val top = box.boundingBox.top * scale + offsetY
+                        val right = box.boundingBox.right * scale + offsetX
+                        val bottom = box.boundingBox.bottom * scale + offsetY
+                        val rectSize = Size((right - left).coerceAtLeast(24f), (bottom - top).coerceAtLeast(16f))
+
+                        drawRoundRect(
+                            color = box.color.copy(alpha = 0.28f),
+                            topLeft = Offset(left, top),
+                            size = rectSize,
+                            cornerRadius = CornerRadius(8f, 8f)
+                        )
+                        drawRoundRect(
+                            color = box.color,
+                            topLeft = Offset(left, top),
+                            size = rectSize,
+                            cornerRadius = CornerRadius(8f, 8f),
+                            style = Stroke(width = 4f)
+                        )
+                    }
+                }
+
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val imgW = imageWidth.toFloat().coerceAtLeast(1f)
+                    val imgH = imageHeight.toFloat().coerceAtLeast(1f)
+                    val scale = maxOf(maxWidth.value / imgW, maxHeight.value / imgH)
+                    val offsetX = (maxWidth.value - imgW * scale) / 2f
+                    val offsetY = (maxHeight.value - imgH * scale) / 2f
+
+                    highlightBoxes.forEach { box ->
+                        val badgeX = (box.boundingBox.left * scale + offsetX - 8f).coerceAtLeast(4f)
+                        val badgeY = (box.boundingBox.top * scale + offsetY - 8f).coerceAtLeast(4f)
+                        Surface(
+                            shape = CircleShape,
+                            color = box.color,
+                            contentColor = Color.White,
+                            border = BorderStroke(1.5.dp, Color.White),
+                            modifier = Modifier
+                                .offset(x = badgeX.dp, y = badgeY.dp)
+                                .size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "${box.index}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             Surface(
                 shape = RoundedCornerShape(10.dp),
@@ -1452,7 +1631,7 @@ fun ClickableCapturedImageCard(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Tap to Zoom Image",
+                        text = if (highlightBoxes.isNotEmpty()) "${highlightBoxes.size} Warnings Mapped • Tap to Zoom" else "Tap to Zoom Image",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -1466,6 +1645,9 @@ fun ClickableCapturedImageCard(
             imageBitmap = bitmap,
             title = title,
             subtitle = subtitle,
+            highlightBoxes = highlightBoxes,
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
             onDismiss = { showZoomDialog = false }
         )
     }

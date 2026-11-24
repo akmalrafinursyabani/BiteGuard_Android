@@ -105,6 +105,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -117,6 +118,7 @@ import com.biteguard.core.ui.components.BiteGuardAccordion
 import com.biteguard.core.ui.components.ClickableCapturedImageCard
 import com.biteguard.core.ui.components.FlaggedIngredientCard
 import com.biteguard.core.ui.components.HighlightedRawTextCard
+import com.biteguard.core.ui.components.ImageHighlightBox
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.OfflineModelLottieAlertDialog
 import com.biteguard.core.ui.components.SafetyVerdictBanner
@@ -1078,6 +1080,9 @@ private fun DedicatedAuditResultScreen(
                     CompletedVerdictSheetCard(
                         verdict = currentStream.data,
                         profile = state.profile,
+                        capturedBoxes = state.capturedBoxes,
+                        imageWidth = state.capturedFrameWidth,
+                        imageHeight = state.capturedFrameHeight,
                         onFeedback = { fb -> onIntent(ScannerIntent.SubmitFeedback(currentStream.data, fb)) },
                         onScanAnother = { onIntent(ScannerIntent.DismissAuditResult) }
                     )
@@ -1211,6 +1216,9 @@ private fun StreamingTypewriterCard(
 private fun CompletedVerdictSheetCard(
     verdict: AuditVerdict,
     profile: com.biteguard.core.model.UserDietaryProfile,
+    capturedBoxes: List<DetectedTextBox> = emptyList(),
+    imageWidth: Int = 1080,
+    imageHeight: Int = 1920,
     onFeedback: (com.biteguard.core.model.UserFeedback) -> Unit,
     onScanAnother: () -> Unit,
     modifier: Modifier = Modifier
@@ -1234,6 +1242,33 @@ private fun CompletedVerdictSheetCard(
     ) {
         value = withContext(Dispatchers.Default) {
             LocalFallbackAuditEngine.extractHighlightTerms(verdict, profile)
+        }
+    }
+
+    // Correlate flagged ingredients with OCR cluster bounding boxes for numbered pins
+    val highlightBoxes = remember(verdict.flaggedIngredients, capturedBoxes) {
+        if (capturedBoxes.isEmpty()) return@remember emptyList()
+        verdict.flaggedIngredients.mapIndexedNotNull { index, flag ->
+            val matchingBox = capturedBoxes.firstOrNull { box ->
+                box.text.contains(flag.name, ignoreCase = true) ||
+                    flag.name.split(" ", "-", ",").any { part ->
+                        part.length >= 3 && box.text.contains(part, ignoreCase = true)
+                    }
+            } ?: capturedBoxes.getOrNull(index % capturedBoxes.size)
+
+            if (matchingBox != null) {
+                val boxColor = when (flag.severity) {
+                    com.biteguard.core.model.Severity.HIGH -> Color(0xFFBA1A1A)
+                    com.biteguard.core.model.Severity.MEDIUM -> Color(0xFFC97A00)
+                    com.biteguard.core.model.Severity.LOW -> Color(0xFF006874)
+                }
+                ImageHighlightBox(
+                    index = index + 1,
+                    label = flag.name,
+                    boundingBox = matchingBox.boundingBox,
+                    color = boxColor
+                )
+            } else null
         }
     }
 
@@ -1272,13 +1307,20 @@ private fun CompletedVerdictSheetCard(
             }
         }
 
-        // Captured Package Image with Click-to-Zoom
+        // Captured Package Image with Click-to-Zoom and Cluster Pins
         if (verdict.snapshotThumbnailBytes != null) {
             item {
                 ClickableCapturedImageCard(
                     thumbnailBytes = verdict.snapshotThumbnailBytes,
                     title = verdict.productName,
-                    subtitle = "Scanned package photo • Tap to zoom"
+                    subtitle = if (highlightBoxes.isNotEmpty()) {
+                        "Scanned package photo • ${highlightBoxes.size} cluster(s) mapped • Tap to zoom"
+                    } else {
+                        "Scanned package photo • Tap to zoom"
+                    },
+                    highlightBoxes = highlightBoxes,
+                    imageWidth = if (imageWidth > 0) imageWidth else 1080,
+                    imageHeight = if (imageHeight > 0) imageHeight else 1920
                 )
             }
         }
@@ -1324,18 +1366,43 @@ private fun CompletedVerdictSheetCard(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 filteredKeywords.forEach { word ->
+                                    val matchingFlagIdx = verdict.flaggedIngredients.indexOfFirst { flag ->
+                                        flag.name.contains(word, ignoreCase = true) || word.contains(flag.name, ignoreCase = true)
+                                    }
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = family.colorContainer,
                                         contentColor = family.onColorContainer,
                                         border = BorderStroke(1.dp, family.color)
                                     ) {
-                                        Text(
-                                            text = word,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                        )
+                                        ) {
+                                            if (matchingFlagIdx >= 0) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = family.color,
+                                                    contentColor = family.onColor,
+                                                    modifier = Modifier.size(18.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = "${matchingFlagIdx + 1}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Black,
+                                                            fontSize = 10.sp
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                            }
+                                            Text(
+                                                text = word,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1344,8 +1411,11 @@ private fun CompletedVerdictSheetCard(
                         val primaryFlags = verdict.flaggedIngredients.take(2)
                         val overflowFlags = verdict.flaggedIngredients.drop(2)
 
-                        primaryFlags.forEach { flag ->
-                            FlaggedIngredientCard(ingredient = flag)
+                        primaryFlags.forEachIndexed { idx, flag ->
+                            FlaggedIngredientCard(
+                                ingredient = flag,
+                                badgeNumber = idx + 1
+                            )
                         }
 
                         if (overflowFlags.isNotEmpty()) {
@@ -1357,8 +1427,11 @@ private fun CompletedVerdictSheetCard(
                                 initiallyExpanded = false
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    overflowFlags.forEach { flag ->
-                                        FlaggedIngredientCard(ingredient = flag)
+                                    overflowFlags.forEachIndexed { overflowIdx, flag ->
+                                        FlaggedIngredientCard(
+                                            ingredient = flag,
+                                            badgeNumber = primaryFlags.size + overflowIdx + 1
+                                        )
                                     }
                                 }
                             }
@@ -1405,10 +1478,16 @@ private fun CompletedVerdictSheetCard(
                     .heightIn(min = 52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = family.color,
-                    contentColor = family.onColor
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text("Scan Next Package", fontWeight = FontWeight.ExtraBold)
             }
         }

@@ -56,6 +56,7 @@ interface AuditRepository {
 
     suspend fun submitFeedback(verdict: AuditVerdict, feedback: UserFeedback)
     suspend fun clearScanHistory()
+    suspend fun deleteVerdicts(ids: List<String>)
 }
 
 class DefaultAuditRepository(
@@ -353,6 +354,10 @@ class DefaultAuditRepository(
 
     override suspend fun clearScanHistory() {
         auditLogDataSource.clearHistory()
+    }
+
+    override suspend fun deleteVerdicts(ids: List<String>) {
+        auditLogDataSource.deleteVerdicts(ids)
     }
 
     /**
