@@ -22,6 +22,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,6 +99,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -105,6 +108,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -117,6 +121,7 @@ import com.biteguard.core.ui.components.BiteGuardAccordion
 import com.biteguard.core.ui.components.ClickableCapturedImageCard
 import com.biteguard.core.ui.components.FlaggedIngredientCard
 import com.biteguard.core.ui.components.HighlightedRawTextCard
+import com.biteguard.core.ui.components.ImageHighlightBox
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.OfflineModelLottieAlertDialog
 import com.biteguard.core.ui.components.SafetyVerdictBanner
@@ -503,26 +508,34 @@ private fun InteractiveBlockSelectionScreen(
         ) {
             OutlinedButton(
                 onClick = { onIntent(ScannerIntent.CancelBlockSelection) },
-                modifier = Modifier.heightIn(min = 40.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Retake photo",
+                    contentDescription = stringResource(com.biteguard.core.ui.R.string.retake_photo),
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Retake Photo", fontWeight = FontWeight.Bold)
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.retake_photo),
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             Text(
-                text = "Choose Text Blocks to Scan",
+                text = stringResource(com.biteguard.core.ui.R.string.choose_text_blocks),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = "${state.selectedBlockIndices.size} of ${state.capturedBoxes.size} detected block(s) selected",
+                text = stringResource(
+                    com.biteguard.core.ui.R.string.blocks_selected_format,
+                    state.selectedBlockIndices.size,
+                    state.capturedBoxes.size
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -641,7 +654,8 @@ private fun InteractiveBlockSelectionScreen(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 42.dp),
+                    .heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
@@ -651,8 +665,10 @@ private fun InteractiveBlockSelectionScreen(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (allSelected) "Clear All" else "Select All",
-                    fontWeight = FontWeight.Bold
+                    text = if (allSelected) stringResource(com.biteguard.core.ui.R.string.clear_all) else stringResource(com.biteguard.core.ui.R.string.select_all),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -666,7 +682,8 @@ private fun InteractiveBlockSelectionScreen(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 42.dp),
+                    .heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
@@ -675,7 +692,12 @@ private fun InteractiveBlockSelectionScreen(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Edit Text", fontWeight = FontWeight.Bold)
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.edit_text),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 
@@ -778,6 +800,7 @@ private fun InteractiveBlockSelectionScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 54.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = semanticColors.safe.color,
@@ -787,7 +810,7 @@ private fun InteractiveBlockSelectionScreen(
             Icon(imageVector = Icons.Default.DocumentScanner, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Scan Selected Blocks (${state.selectedBlockIndices.size})",
+                text = stringResource(com.biteguard.core.ui.R.string.scan_selected_blocks, state.selectedBlockIndices.size),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.ExtraBold
             )
@@ -945,9 +968,9 @@ private fun ScannerActionControls(
                 text = {
                     Text(
                         text = when {
-                            isReadyToScan -> "READY — CAPTURE & PICK BLOCKS"
-                            hasDetectedText -> "CAPTURE & CHOOSE TEXT BLOCKS"
-                            else -> "SCAN PACKAGE LABEL"
+                            isReadyToScan -> stringResource(com.biteguard.core.ui.R.string.btn_ready_capture)
+                            hasDetectedText -> stringResource(com.biteguard.core.ui.R.string.btn_capture_choose)
+                            else -> stringResource(com.biteguard.core.ui.R.string.btn_scan_label)
                         },
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.ExtraBold
@@ -964,7 +987,8 @@ private fun ScannerActionControls(
                 onClick = onOpenManualInput,
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
@@ -978,14 +1002,20 @@ private fun ScannerActionControls(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Manual Text", fontWeight = FontWeight.Bold)
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.btn_manual_text),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             FilledTonalButton(
                 onClick = { onRunSamplePreset(ScannerViewModel.SAMPLE_PRESETS.first()) },
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
@@ -999,7 +1029,12 @@ private fun ScannerActionControls(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Demo Sample", fontWeight = FontWeight.Bold)
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.btn_demo_sample),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -1039,19 +1074,23 @@ private fun DedicatedAuditResultScreen(
         ) {
             OutlinedButton(
                 onClick = { onIntent(ScannerIntent.DismissAuditResult) },
-                modifier = Modifier.heightIn(min = 42.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back to camera scanner",
+                    contentDescription = stringResource(com.biteguard.core.ui.R.string.back_to_camera),
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Back to Camera", fontWeight = FontWeight.Bold)
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.back_to_camera),
+                    fontWeight = FontWeight.Bold
+                )
             }
             Text(
-                text = "Label Audit Result",
+                text = stringResource(com.biteguard.core.ui.R.string.label_audit_result),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground
@@ -1078,6 +1117,9 @@ private fun DedicatedAuditResultScreen(
                     CompletedVerdictSheetCard(
                         verdict = currentStream.data,
                         profile = state.profile,
+                        capturedBoxes = state.capturedBoxes,
+                        imageWidth = state.capturedFrameWidth,
+                        imageHeight = state.capturedFrameHeight,
                         onFeedback = { fb -> onIntent(ScannerIntent.SubmitFeedback(currentStream.data, fb)) },
                         onScanAnother = { onIntent(ScannerIntent.DismissAuditResult) }
                     )
@@ -1211,6 +1253,9 @@ private fun StreamingTypewriterCard(
 private fun CompletedVerdictSheetCard(
     verdict: AuditVerdict,
     profile: com.biteguard.core.model.UserDietaryProfile,
+    capturedBoxes: List<DetectedTextBox> = emptyList(),
+    imageWidth: Int = 1080,
+    imageHeight: Int = 1920,
     onFeedback: (com.biteguard.core.model.UserFeedback) -> Unit,
     onScanAnother: () -> Unit,
     modifier: Modifier = Modifier
@@ -1234,6 +1279,33 @@ private fun CompletedVerdictSheetCard(
     ) {
         value = withContext(Dispatchers.Default) {
             LocalFallbackAuditEngine.extractHighlightTerms(verdict, profile)
+        }
+    }
+
+    // Correlate flagged ingredients with OCR cluster bounding boxes for numbered pins
+    val highlightBoxes = remember(verdict.flaggedIngredients, capturedBoxes) {
+        if (capturedBoxes.isEmpty()) return@remember emptyList()
+        verdict.flaggedIngredients.mapIndexedNotNull { index, flag ->
+            val matchingBox = capturedBoxes.firstOrNull { box ->
+                box.text.contains(flag.name, ignoreCase = true) ||
+                    flag.name.split(" ", "-", ",").any { part ->
+                        part.length >= 3 && box.text.contains(part, ignoreCase = true)
+                    }
+            } ?: capturedBoxes.getOrNull(index % capturedBoxes.size)
+
+            if (matchingBox != null) {
+                val boxColor = when (flag.severity) {
+                    com.biteguard.core.model.Severity.HIGH -> Color(0xFFBA1A1A)
+                    com.biteguard.core.model.Severity.MEDIUM -> Color(0xFFC97A00)
+                    com.biteguard.core.model.Severity.LOW -> Color(0xFF006874)
+                }
+                ImageHighlightBox(
+                    index = index + 1,
+                    label = flag.name,
+                    boundingBox = matchingBox.boundingBox,
+                    color = boxColor
+                )
+            } else null
         }
     }
 
@@ -1272,13 +1344,20 @@ private fun CompletedVerdictSheetCard(
             }
         }
 
-        // Captured Package Image with Click-to-Zoom
+        // Captured Package Image with Click-to-Zoom and Cluster Pins
         if (verdict.snapshotThumbnailBytes != null) {
             item {
                 ClickableCapturedImageCard(
                     thumbnailBytes = verdict.snapshotThumbnailBytes,
                     title = verdict.productName,
-                    subtitle = "Scanned package photo • Tap to zoom"
+                    subtitle = if (highlightBoxes.isNotEmpty()) {
+                        "Scanned package photo • ${highlightBoxes.size} cluster(s) mapped • Tap to zoom"
+                    } else {
+                        "Scanned package photo • Tap to zoom"
+                    },
+                    highlightBoxes = highlightBoxes,
+                    imageWidth = if (imageWidth > 0) imageWidth else 1080,
+                    imageHeight = if (imageHeight > 0) imageHeight else 1920
                 )
             }
         }
@@ -1310,7 +1389,7 @@ private fun CompletedVerdictSheetCard(
                                 tint = family.color
                             )
                             Text(
-                                text = "Filtered Words & Flagged Ingredients (${verdict.flaggedIngredients.size})",
+                                text = stringResource(com.biteguard.core.ui.R.string.filtered_and_flagged_title, verdict.flaggedIngredients.size),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -1324,18 +1403,43 @@ private fun CompletedVerdictSheetCard(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 filteredKeywords.forEach { word ->
+                                    val matchingFlagIdx = verdict.flaggedIngredients.indexOfFirst { flag ->
+                                        flag.name.contains(word, ignoreCase = true) || word.contains(flag.name, ignoreCase = true)
+                                    }
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = family.colorContainer,
                                         contentColor = family.onColorContainer,
                                         border = BorderStroke(1.dp, family.color)
                                     ) {
-                                        Text(
-                                            text = word,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                        )
+                                        ) {
+                                            if (matchingFlagIdx >= 0) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = family.color,
+                                                    contentColor = family.onColor,
+                                                    modifier = Modifier.size(18.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = "${matchingFlagIdx + 1}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Black,
+                                                            fontSize = 10.sp
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                            }
+                                            Text(
+                                                text = word,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1344,21 +1448,27 @@ private fun CompletedVerdictSheetCard(
                         val primaryFlags = verdict.flaggedIngredients.take(2)
                         val overflowFlags = verdict.flaggedIngredients.drop(2)
 
-                        primaryFlags.forEach { flag ->
-                            FlaggedIngredientCard(ingredient = flag)
+                        primaryFlags.forEachIndexed { idx, flag ->
+                            FlaggedIngredientCard(
+                                ingredient = flag,
+                                badgeNumber = idx + 1
+                            )
                         }
 
                         if (overflowFlags.isNotEmpty()) {
                             BiteGuardAccordion(
-                                title = "More Flagged Ingredients",
-                                subtitle = "Tap to view ${overflowFlags.size} additional flagged item(s)",
+                                title = stringResource(com.biteguard.core.ui.R.string.more_flagged_ingredients),
+                                subtitle = stringResource(com.biteguard.core.ui.R.string.more_flagged_subtitle, overflowFlags.size),
                                 badgeText = "+${overflowFlags.size}",
                                 accentColor = family.color,
                                 initiallyExpanded = false
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    overflowFlags.forEach { flag ->
-                                        FlaggedIngredientCard(ingredient = flag)
+                                    overflowFlags.forEachIndexed { overflowIdx, flag ->
+                                        FlaggedIngredientCard(
+                                            ingredient = flag,
+                                            badgeNumber = primaryFlags.size + overflowIdx + 1
+                                        )
                                     }
                                 }
                             }
@@ -1381,8 +1491,8 @@ private fun CompletedVerdictSheetCard(
         // SECTION 4: Accordion for Raw Extracted Label Text & Medical Disclaimer
         item {
             BiteGuardAccordion(
-                title = "Extracted OCR Text & Disclaimer",
-                subtitle = "Inspect raw package label with filtered words highlighted",
+                title = stringResource(com.biteguard.core.ui.R.string.extracted_ocr_disclaimer),
+                subtitle = stringResource(com.biteguard.core.ui.R.string.extracted_ocr_subtitle),
                 leadingIcon = Icons.Default.Description,
                 accentColor = MaterialTheme.colorScheme.primary,
                 initiallyExpanded = false
@@ -1403,13 +1513,23 @@ private fun CompletedVerdictSheetCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = family.color,
-                    contentColor = family.onColor
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Text("Scan Next Package", fontWeight = FontWeight.ExtraBold)
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(com.biteguard.core.ui.R.string.scan_next_package),
+                    fontWeight = FontWeight.ExtraBold
+                )
             }
         }
     }
@@ -1553,8 +1673,10 @@ private fun CameraPermissionFallbackContent(
 
     Column(
         modifier = modifier
+            .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp, vertical = 84.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -1594,13 +1716,13 @@ private fun CameraPermissionFallbackContent(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Camera Access Needed",
+                            text = stringResource(com.biteguard.core.ui.R.string.camera_access_needed),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Live OCR Label Scanner",
+                            text = stringResource(com.biteguard.core.ui.R.string.camera_scanner_subtitle),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1608,7 +1730,7 @@ private fun CameraPermissionFallbackContent(
                 }
 
                 Text(
-                    text = "Grant camera permission to capture package ingredient blocks, or test immediately using manual text or a sample label below.",
+                    text = stringResource(com.biteguard.core.ui.R.string.camera_access_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1619,6 +1741,7 @@ private fun CameraPermissionFallbackContent(
                         .fillMaxWidth()
                         .heightIn(min = 52.dp),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = semanticColors.safe.color,
                         contentColor = semanticColors.safe.onColor
@@ -1626,7 +1749,10 @@ private fun CameraPermissionFallbackContent(
                 ) {
                     Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Grant Camera Permission", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        text = stringResource(com.biteguard.core.ui.R.string.grant_camera_permission),
+                        fontWeight = FontWeight.ExtraBold
+                    )
                 }
 
                 OutlinedButton(
@@ -1635,6 +1761,7 @@ private fun CameraPermissionFallbackContent(
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = MaterialTheme.colorScheme.surface,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -1648,7 +1775,7 @@ private fun CameraPermissionFallbackContent(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Run Sample Label Audit",
+                        text = stringResource(com.biteguard.core.ui.R.string.run_sample_audit),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1660,6 +1787,7 @@ private fun CameraPermissionFallbackContent(
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = MaterialTheme.colorScheme.surface,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -1669,11 +1797,11 @@ private fun CameraPermissionFallbackContent(
                     Icon(
                         imageVector = Icons.Default.EditNote,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Paste / Edit Ingredient Text",
+                        text = stringResource(com.biteguard.core.ui.R.string.enter_manual_text),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )

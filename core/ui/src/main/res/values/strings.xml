@@ -1,0 +1,153 @@
+<resources>
+    <!-- App & General -->
+    <string name="app_name">BiteGuard AI</string>
+    <string name="header_subtitle">Smart Food &amp; Allergen Auditor</string>
+    <string name="header_guarding">Guarding %1$s • Smart Food Auditor</string>
+
+    <!-- Navigation -->
+    <string name="nav_scanner">Scan Label</string>
+    <string name="nav_scanner_desc">Scan package ingredient label</string>
+    <string name="nav_history">Audit Log</string>
+    <string name="nav_history_desc">View encrypted scan history</string>
+    <string name="nav_profile">My Profile</string>
+    <string name="nav_profile_desc">Configure allergens and health goals</string>
+
+    <!-- Safety Levels -->
+    <string name="safety_safe_label">SAFE</string>
+    <string name="safety_safe_title">Safe for Your Profile</string>
+    <string name="safety_caution_label">CAUTION</string>
+    <string name="safety_caution_title">Review Flagged Ingredients</string>
+    <string name="safety_danger_label">DANGER</string>
+    <string name="safety_danger_title">Do Not Consume — Conflict Detected</string>
+    <string name="local_match">LOCAL MATCH</string>
+
+    <!-- Scanner Stage & Actions -->
+    <string name="choose_text_blocks">Choose Text Blocks to Scan</string>
+    <string name="blocks_selected_format">%1$d of %2$d detected block(s) selected</string>
+    <string name="retake_photo">Retake Photo</string>
+    <string name="select_all">Select All</string>
+    <string name="clear_all">Clear All</string>
+    <string name="edit_text">Edit Text</string>
+    <string name="scan_selected_blocks">Scan Selected Blocks (%1$d)</string>
+    <string name="scan_next_package">Scan Next Package</string>
+    <string name="btn_ready_capture">READY — CAPTURE &amp; PICK BLOCKS</string>
+    <string name="btn_capture_choose">CAPTURE &amp; CHOOSE TEXT BLOCKS</string>
+    <string name="btn_scan_label">SCAN PACKAGE LABEL</string>
+    <string name="btn_manual_text">Manual Text</string>
+    <string name="btn_demo_sample">Demo Sample</string>
+
+    <!-- Camera Permission -->
+    <string name="camera_access_needed">Camera Access Needed</string>
+    <string name="camera_scanner_subtitle">Live OCR Label Scanner</string>
+    <string name="camera_access_desc">Grant camera permission to capture package ingredient blocks, or test immediately using manual text or a sample label below.</string>
+    <string name="grant_camera_permission">Grant Camera Permission</string>
+    <string name="run_sample_audit">Run Sample Label Audit</string>
+    <string name="enter_manual_text">Enter Manual Text</string>
+
+    <!-- Audit Result -->
+    <string name="label_audit_result">Label Audit Result</string>
+    <string name="back_to_camera">Back to Camera</string>
+    <string name="filtered_and_flagged_title">Filtered Words &amp; Flagged Ingredients (%1$d)</string>
+    <string name="more_flagged_ingredients">More Flagged Ingredients</string>
+    <string name="more_flagged_subtitle">Tap to view %1$d additional flagged item(s)</string>
+    <string name="extracted_ocr_disclaimer">Extracted OCR Text &amp; Disclaimer</string>
+    <string name="extracted_ocr_subtitle">Inspect raw package label with filtered words highlighted</string>
+    <string name="was_verdict_accurate">Was this verdict accurate?</string>
+    <string name="feedback_queued">Feedback queued for telemetry</string>
+    <string name="btn_helpful">Helpful</string>
+    <string name="btn_report">Report</string>
+    <string name="medical_disclaimer">BiteGuard AI is an informational decision-support tool. It does not replace professional medical advice, diagnosis, or official product package verification.</string>
+
+    <!-- Allergens -->
+    <string name="allergen_peanuts">Peanuts</string>
+    <string name="allergen_peanuts_ex">Arachis oil, groundnuts, peanut flour</string>
+    <string name="allergen_tree_nuts">Tree Nuts</string>
+    <string name="allergen_tree_nuts_ex">Almonds, cashews, walnuts, praline</string>
+    <string name="allergen_dairy">Dairy</string>
+    <string name="allergen_dairy_ex">Casein, whey, lactose, ghee, lactalbumin</string>
+    <string name="allergen_gluten">Gluten</string>
+    <string name="allergen_gluten_ex">Wheat, barley, rye, malt, triticale, seitan</string>
+    <string name="allergen_shellfish">Shellfish</string>
+    <string name="allergen_shellfish_ex">Shrimp, crab, lobster, prawn, krill</string>
+    <string name="allergen_soy">Soy</string>
+    <string name="allergen_soy_ex">Soy lecithin, tofu, edamame, glycine max</string>
+    <string name="allergen_eggs">Eggs</string>
+    <string name="allergen_eggs_ex">Albumin, globulin, lysozyme, mayonnaise</string>
+    <string name="allergen_fish">Fish</string>
+    <string name="allergen_fish_ex">Anchovy, fish sauce, surimi, omega-3 fish oil</string>
+    <string name="allergen_sesame">Sesame</string>
+    <string name="allergen_sesame_ex">Tahini, sesamum indicum, gingelly oil, Halvah</string>
+
+    <!-- Health Goals -->
+    <string name="goal_low_sugar">Low Sugar</string>
+    <string name="goal_low_sugar_desc">Flags high-fructose corn syrup, maltodextrin, sucrose, dextrose</string>
+    <string name="goal_low_sodium">Low Sodium</string>
+    <string name="goal_low_sodium_desc">Flags MSG, disodium inosinate, high salt &amp; sodium compounds</string>
+    <string name="goal_halal">Halal</string>
+    <string name="goal_halal_desc">Flags pork/lard derivatives, gelatin, non-halal alcohol/enzymes</string>
+    <string name="goal_vegan">Vegan</string>
+    <string name="goal_vegan_desc">Flags all animal-derived ingredients including dairy, eggs, honey, carmine</string>
+    <string name="goal_vegetarian">Vegetarian</string>
+    <string name="goal_vegetarian_desc">Flags meat, poultry, fish, lard, tallow, animal rennet</string>
+    <string name="goal_keto">Keto-Friendly</string>
+    <string name="goal_keto_desc">Flags starches, refined grains, added sugars, high-carb fillers</string>
+
+    <!-- Severity -->
+    <string name="severity_high">High Risk</string>
+    <string name="severity_medium">Moderate Risk</string>
+    <string name="severity_low">Low Risk / Advisory</string>
+
+    <!-- Profile & Settings -->
+    <string name="profile_title">Dietary &amp; Health Profile</string>
+    <string name="profile_desc">Configured preferences are audited locally in offline mode and guide the Gemini Vision auditor.</string>
+    <string name="allergens_to_guard">Allergens to Guard (%1$d)</string>
+    <string name="allergens_section_desc">Select ingredients that trigger allergic or adverse reactions.</string>
+    <string name="health_goals_title">Health Goals &amp; Diets (%1$d)</string>
+    <string name="health_goals_desc">Active diets prioritize flags even if ingredients are not allergens.</string>
+    <string name="language_setting">Display Language</string>
+    <string name="language_system">System Default</string>
+    <string name="language_en">English</string>
+    <string name="language_in">Bahasa Indonesia</string>
+    <string name="language_ko">한국어 (Korean)</string>
+    <string name="high_contrast_setting">High Contrast Mode</string>
+    <string name="high_contrast_desc">Enhances text legibility and accessibility borders</string>
+
+    <!-- Scan History -->
+    <string name="history_title">Scan History</string>
+    <string name="history_subtitle">%1$d saved scan(s) • Stored privately on your phone</string>
+    <string name="history_search_placeholder">Search scanned products or flagged ingredients...</string>
+    <string name="history_empty_title">No Scans Recorded Yet</string>
+    <string name="history_empty_desc">Point your camera at a food package or try a sample preset on the scanner tab.</string>
+    <string name="history_filter_all">All (%1$d)</string>
+    <string name="history_clear_dialog_title">Clear Scan History?</string>
+    <string name="history_clear_dialog_desc">This permanently deletes all saved scan logs from this device. This cannot be undone.</string>
+    <string name="history_bulk_delete_title">Delete Selected Scans?</string>
+    <string name="history_bulk_delete_desc">Permanently remove %1$d selected scan record(s) from your device?</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_clear_all">Clear All</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">Welcome to BiteGuard AI</string>
+    <string name="onboarding_subtitle">Your personal AI label auditor that spots hidden allergens and chemical derivatives in real time.</string>
+    <string name="onboarding_name_prompt">What should we call you?</string>
+    <string name="onboarding_name_placeholder">e.g., Alex</string>
+    <string name="onboarding_name_label">Your Name</string>
+    <string name="onboarding_ready_title">Ready to make every bite safer and healthier?</string>
+    <string name="onboarding_ready_subtitle">Tell us your name so we can personalize your on-device dietary guardian.</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_btn_continue_allergen">Continue to Allergen Setup</string>
+    <string name="onboarding_pick_allergies_format">Hi %1$s, pick your allergies</string>
+    <string name="onboarding_pick_allergies_desc">Select any allergens you need BiteGuard AI to flag immediately, or skip if you have none.</string>
+    <string name="onboarding_goals_accordion_title">Dietary &amp; Health Goals (Optional)</string>
+    <string name="onboarding_goals_accordion_subtitle">Low Sugar, Halal, Vegan, Keto &amp; more</string>
+    <string name="onboarding_goals_picked_format">%1$d picked</string>
+    <string name="onboarding_optional">Optional</string>
+    <string name="onboarding_disclaimer_accordion_title">Safety &amp; Medical Disclaimer</string>
+    <string name="onboarding_disclaimer_accordion_subtitle">Important informational decision-support notice</string>
+    <string name="onboarding_start_guarding">Start Guarding (%1$d)</string>
+    <string name="onboarding_start_scanning">Start Scanning</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_step_format">Step %1$d of %2$d</string>
+    <string name="onboarding_select_language">Select Language</string>
+</resources>

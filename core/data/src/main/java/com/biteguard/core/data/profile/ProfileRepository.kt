@@ -35,6 +35,7 @@ interface ProfileRepository {
     suspend fun toggleAllergen(allergen: Allergen)
     suspend fun toggleHealthGoal(goal: HealthGoal)
     suspend fun setHighContrastMode(enabled: Boolean)
+    suspend fun setLanguage(language: String)
     suspend fun setOnboardingAccepted(accepted: Boolean)
     suspend fun completeOnboarding(
         userName: String,
@@ -60,6 +61,7 @@ class DataStoreProfileRepository(
         val HEALTH_GOALS = stringSetPreferencesKey("selected_health_goals")
         val LAST_UPDATED = longPreferencesKey("last_updated_epoch_milli")
         val HIGH_CONTRAST = booleanPreferencesKey("high_contrast_mode")
+        val LANGUAGE = stringPreferencesKey("app_language")
         val ONBOARDING_ACCEPTED = booleanPreferencesKey("onboarding_disclaimer_accepted")
     }
 
@@ -82,6 +84,7 @@ class DataStoreProfileRepository(
 
             val updatedEpoch = prefs[Keys.LAST_UPDATED] ?: System.currentTimeMillis()
             val highContrast = prefs[Keys.HIGH_CONTRAST] ?: false
+            val language = prefs[Keys.LANGUAGE] ?: "SYSTEM"
 
             if (prefs[Keys.ONBOARDING_ACCEPTED] == true || userName.isNotBlank()) {
                 syncPrefs.edit().putBoolean(Keys.SYNC_ONBOARDING_DONE, true).apply()
@@ -92,7 +95,8 @@ class DataStoreProfileRepository(
                 selectedAllergens = allergens,
                 healthGoals = goals,
                 lastUpdated = Instant.ofEpochMilli(updatedEpoch),
-                highContrastMode = highContrast
+                highContrastMode = highContrast,
+                selectedLanguage = language
             )
         }.flowOn(ioDispatcher)
 
@@ -149,6 +153,13 @@ class DataStoreProfileRepository(
         }
     }
 
+    override suspend fun setLanguage(language: String): Unit = withContext(ioDispatcher) {
+        context.biteGuardDataStore.edit { prefs ->
+            prefs[Keys.LANGUAGE] = language
+            prefs[Keys.LAST_UPDATED] = System.currentTimeMillis()
+        }
+    }
+
     override suspend fun setOnboardingAccepted(accepted: Boolean): Unit = withContext(ioDispatcher) {
         syncPrefs.edit().putBoolean(Keys.SYNC_ONBOARDING_DONE, accepted).commit()
         context.biteGuardDataStore.edit { prefs ->
@@ -182,6 +193,7 @@ class DataStoreProfileRepository(
             prefs[Keys.ALLERGENS] = profile.selectedAllergens.map { it.name }.toSet()
             prefs[Keys.HEALTH_GOALS] = profile.healthGoals.map { it.name }.toSet()
             prefs[Keys.HIGH_CONTRAST] = profile.highContrastMode
+            prefs[Keys.LANGUAGE] = profile.selectedLanguage
             prefs[Keys.LAST_UPDATED] = Instant.now().toEpochMilli()
         }
     }
@@ -227,6 +239,10 @@ class InMemoryProfileRepository(
 
     override suspend fun setHighContrastMode(enabled: Boolean) {
         _profile.value = _profile.value.copy(highContrastMode = enabled, lastUpdated = Instant.now())
+    }
+
+    override suspend fun setLanguage(language: String) {
+        _profile.value = _profile.value.copy(selectedLanguage = language, lastUpdated = Instant.now())
     }
 
     override suspend fun setOnboardingAccepted(accepted: Boolean) {

@@ -1,0 +1,153 @@
+<resources>
+    <!-- App & General -->
+    <string name="app_name">BiteGuard AI</string>
+    <string name="header_subtitle">스마트 식품 및 알레르겐 분석기</string>
+    <string name="header_guarding">%1$s 님 보호 중 • 식품 분석기</string>
+
+    <!-- Navigation -->
+    <string name="nav_scanner">라벨 스캔</string>
+    <string name="nav_scanner_desc">식품 포장 원재료 라벨 스캔</string>
+    <string name="nav_history">검사 기록</string>
+    <string name="nav_history_desc">암호화된 스캔 기록 보기</string>
+    <string name="nav_profile">내 프로필</string>
+    <string name="nav_profile_desc">알레르기 및 건강 목표 설정</string>
+
+    <!-- Safety Levels -->
+    <string name="safety_safe_label">안전</string>
+    <string name="safety_safe_title">프로필에 안전함</string>
+    <string name="safety_caution_label">주의</string>
+    <string name="safety_caution_title">감지된 성분 확인 필요</string>
+    <string name="safety_danger_label">위험</string>
+    <string name="safety_danger_title">섭취 금지 — 충돌 성분 감지됨</string>
+    <string name="local_match">로컬 분석</string>
+
+    <!-- Scanner Stage & Actions -->
+    <string name="choose_text_blocks">스캔할 텍스트 블록 선택</string>
+    <string name="blocks_selected_format">%2$d개 중 %1$d개 감지된 블록 선택됨</string>
+    <string name="retake_photo">사진 다시 찍기</string>
+    <string name="select_all">전체 선택</string>
+    <string name="clear_all">선택 해제</string>
+    <string name="edit_text">텍스트 편집</string>
+    <string name="scan_selected_blocks">선택된 블록 스캔 (%1$d)</string>
+    <string name="scan_next_package">다음 제품 스캔</string>
+    <string name="btn_ready_capture">준비 완료 — 촬영 및 블록 선택</string>
+    <string name="btn_capture_choose">촬영 및 텍스트 블록 선택</string>
+    <string name="btn_scan_label">제품 라벨 스캔</string>
+    <string name="btn_manual_text">직접 입력</string>
+    <string name="btn_demo_sample">데모 샘플</string>
+
+    <!-- Camera Permission -->
+    <string name="camera_access_needed">카메라 접근 권한 필요</string>
+    <string name="camera_scanner_subtitle">실시간 OCR 라벨 스캐너</string>
+    <string name="camera_access_desc">제품 성분을 스캔하려면 카메라 권한을 허용하거나, 아래의 직접 입력 또는 샘플 라벨로 바로 테스트해보세요.</string>
+    <string name="grant_camera_permission">카메라 권한 허용</string>
+    <string name="run_sample_audit">샘플 라벨 검사 실행</string>
+    <string name="enter_manual_text">텍스트 직접 입력</string>
+
+    <!-- Audit Result -->
+    <string name="label_audit_result">라벨 검사 결과</string>
+    <string name="back_to_camera">카메라로 돌아가기</string>
+    <string name="filtered_and_flagged_title">필터링된 단어 및 위험 성분 (%1$d)</string>
+    <string name="more_flagged_ingredients">추가 위험 성분</string>
+    <string name="more_flagged_subtitle">%1$d개의 추가 감지 항목 보기</string>
+    <string name="extracted_ocr_disclaimer">추출된 OCR 텍스트 및 면책조항</string>
+    <string name="extracted_ocr_subtitle">필터링된 단어가 강조 표시된 원본 라벨 검토</string>
+    <string name="was_verdict_accurate">이 결과가 정확했나요?</string>
+    <string name="feedback_queued">피드백이 저장되었습니다</string>
+    <string name="btn_helpful">유용함</string>
+    <string name="btn_report">신고</string>
+    <string name="medical_disclaimer">BiteGuard AI는 정보 제공 및 의사결정 보조 도구입니다. 전문적인 의학적 조언, 진단 또는 공식 제품 패키지 확인을 대신할 수 없습니다.</string>
+
+    <!-- Allergens -->
+    <string name="allergen_peanuts">땅콩</string>
+    <string name="allergen_peanuts_ex">땅콩 기름, 땅콩가루, 낙화생 등</string>
+    <string name="allergen_tree_nuts">견과류</string>
+    <string name="allergen_tree_nuts_ex">아몬드, 캐슈넛, 호두, 헤이즐넛, 프랄린 등</string>
+    <string name="allergen_dairy">유제품</string>
+    <string name="allergen_dairy_ex">카제인, 유청, 젖당(락토오스), 버터 등</string>
+    <string name="allergen_gluten">글루텐</string>
+    <string name="allergen_gluten_ex">밀, 보리, 호밀, 맥아, 세이탄 등</string>
+    <string name="allergen_shellfish">갑각류</string>
+    <string name="allergen_shellfish_ex">새우, 게, 랍스터, 대하, 크릴 등</string>
+    <string name="allergen_soy">대두 (콩)</string>
+    <string name="allergen_soy_ex">대두 레시틴, 두부, 에다마메 등</string>
+    <string name="allergen_eggs">계란 (난류)</string>
+    <string name="allergen_eggs_ex">난백, 난황, 알부민, 리소자임, 마요네즈 등</string>
+    <string name="allergen_fish">생선 (어류)</string>
+    <string name="allergen_fish_ex">멸치, 액젓, 어묵(수리미), 피쉬오일 등</string>
+    <string name="allergen_sesame">참깨</string>
+    <string name="allergen_sesame_ex">타히니, 참기름, 할바 등</string>
+
+    <!-- Health Goals -->
+    <string name="goal_low_sugar">저당</string>
+    <string name="goal_low_sugar_desc">고과당 옥수수 시럽, 말토덱스트린, 자당, 포도당 등을 감지합니다</string>
+    <string name="goal_low_sodium">저염 (저나트륨)</string>
+    <string name="goal_low_sodium_desc">MSG, 이노신산이나트륨, 고나트륨 화합물을 감지합니다</string>
+    <string name="goal_halal">할랄</string>
+    <string name="goal_halal_desc">돼지고기/라드 유도체, 젤라틴, 비할랄 알코올/효소를 감지합니다</string>
+    <string name="goal_vegan">비건</string>
+    <string name="goal_vegan_desc">유제품, 계란, 꿀, 카민 등 모든 동물성 유래 성분을 감지합니다</string>
+    <string name="goal_vegetarian">채식주의</string>
+    <string name="goal_vegetarian_desc">육류, 가금류, 어류, 동물성 유지, 레넷 등을 감지합니다</string>
+    <string name="goal_keto">키토 친화적</string>
+    <string name="goal_keto_desc">전분, 정제 곡물, 첨가당, 고탄수화물 성분을 감지합니다</string>
+
+    <!-- Severity -->
+    <string name="severity_high">고위험</string>
+    <string name="severity_medium">중간 위험</string>
+    <string name="severity_low">저위험 / 안내</string>
+
+    <!-- Profile & Settings -->
+    <string name="profile_title">식단 및 건강 프로필</string>
+    <string name="profile_desc">설정된 항목은 오프라인 규칙 및 AI 검사에 실시간으로 반영됩니다.</string>
+    <string name="allergens_to_guard">보호할 알레르겐 (%1$d)</string>
+    <string name="allergens_section_desc">알레르기 반응이나 유해 증상을 유발하는 성분을 선택하세요.</string>
+    <string name="health_goals_title">건강 목표 및 식단 (%1$d)</string>
+    <string name="health_goals_desc">알레르겐이 아니더라도 활성화된 식단 기준에 맞춰 우선 경고합니다.</string>
+    <string name="language_setting">표시 언어</string>
+    <string name="language_system">시스템 기본값</string>
+    <string name="language_en">English</string>
+    <string name="language_in">Bahasa Indonesia</string>
+    <string name="language_ko">한국어 (Korean)</string>
+    <string name="high_contrast_setting">고대비 모드</string>
+    <string name="high_contrast_desc">텍스트 가독성 및 시각적 대비를 강화합니다</string>
+
+    <!-- Scan History -->
+    <string name="history_title">스캔 기록</string>
+    <string name="history_subtitle">%1$d개의 저장된 기록 • 기기 내 안전하게 비공개 저장됨</string>
+    <string name="history_search_placeholder">스캔한 제품 또는 위험 성분 검색…</string>
+    <string name="history_empty_title">저장된 스캔 기록 없음</string>
+    <string name="history_empty_desc">식품 포장지에 카메라를 비추거나 스캐너 탭의 데모 샘플을 체험해보세요.</string>
+    <string name="history_filter_all">전체 (%1$d)</string>
+    <string name="history_clear_dialog_title">스캔 기록을 삭제할까요?</string>
+    <string name="history_clear_dialog_desc">기기에 저장된 모든 스캔 기록이 영구적으로 삭제되며 되돌릴 수 없습니다.</string>
+    <string name="history_bulk_delete_title">선택한 스캔을 삭제할까요?</string>
+    <string name="history_bulk_delete_desc">선택한 %1$d개의 스캔 기록을 기기에서 완전히 삭제하시겠습니까?</string>
+    <string name="btn_cancel">취소</string>
+    <string name="btn_delete">삭제</string>
+    <string name="btn_clear_all">전체 삭제</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">BiteGuard AI에 오신 것을 환영합니다</string>
+    <string name="onboarding_subtitle">숨겨진 알레르겐과 화학 유도체를 실시간으로 찾아내는 나만의 AI 라벨 분석기입니다.</string>
+    <string name="onboarding_name_prompt">어떻게 불러드릴까요?</string>
+    <string name="onboarding_name_placeholder">예: 민수</string>
+    <string name="onboarding_name_label">이름</string>
+    <string name="onboarding_ready_title">모든 식사를 더 안전하고 건강하게 만들 준비가 되셨나요?</string>
+    <string name="onboarding_ready_subtitle">기기 내 맞춤형 식단 보호를 위해 이름을 입력해 주세요.</string>
+    <string name="onboarding_continue">계속</string>
+    <string name="onboarding_btn_continue_allergen">알레르기 설정으로 이동</string>
+    <string name="onboarding_pick_allergies_format">안녕하세요 %1$s님, 알레르기를 선택해 주세요</string>
+    <string name="onboarding_pick_allergies_desc">주의해야 할 알레르기를 선택하세요. 없으시면 건너뛰셔도 됩니다.</string>
+    <string name="onboarding_goals_accordion_title">식단 및 건강 목표 (선택)</string>
+    <string name="onboarding_goals_accordion_subtitle">저당, 할랄, 비건, 키토 등</string>
+    <string name="onboarding_goals_picked_format">%1$d개 선택됨</string>
+    <string name="onboarding_optional">선택사항</string>
+    <string name="onboarding_disclaimer_accordion_title">안전 및 의료 고지</string>
+    <string name="onboarding_disclaimer_accordion_subtitle">중요한 정보 제공 및 의사결정 지원 안내</string>
+    <string name="onboarding_start_guarding">보호 시작하기 (%1$d)</string>
+    <string name="onboarding_start_scanning">스캔 시작하기</string>
+    <string name="onboarding_back">이전</string>
+    <string name="onboarding_step_format">%2$d단계 중 %1$d단계</string>
+    <string name="onboarding_select_language">언어 선택</string>
+</resources>

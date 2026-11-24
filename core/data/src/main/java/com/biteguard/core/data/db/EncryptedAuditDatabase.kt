@@ -13,11 +13,15 @@ import com.biteguard.core.model.Severity
 import com.biteguard.core.model.TelemetryEvent
 import com.biteguard.core.model.UserFeedback
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -44,6 +48,7 @@ interface AuditLogDataSource {
     suspend fun insertVerdict(verdict: AuditVerdict)
     suspend fun updateVerdictFeedback(verdictId: String, feedback: UserFeedback)
     suspend fun clearHistory()
+    suspend fun deleteVerdicts(ids: List<String>)
     suspend fun enqueueTelemetry(event: TelemetryEvent)
     suspend fun markTelemetrySynced(ids: List<String>)
 }
@@ -66,10 +71,18 @@ class EncryptedAuditDatabase(
     }
 
     private val _historyState = MutableStateFlow<List<AuditVerdict>>(emptyList())
-    override val historyFlow: Flow<List<AuditVerdict>> = _historyState.asStateFlow()
+    override val historyFlow: Flow<List<AuditVerdict>> = _historyState
+        .onStart { ensureInitialized() }
 
     private val _telemetryState = MutableStateFlow<List<TelemetryEvent>>(emptyList())
-    override val telemetryQueueFlow: Flow<List<TelemetryEvent>> = _telemetryState.asStateFlow()
+    override val telemetryQueueFlow: Flow<List<TelemetryEvent>> = _telemetryState
+        .onStart { ensureInitialized() }
+
+    init {
+        CoroutineScope(SupervisorJob() + ioDispatcher).launch {
+            ensureInitialized()
+        }
+    }
 
     @Volatile
     private var initialized = false
@@ -171,6 +184,19 @@ class EncryptedAuditDatabase(
             cipherDb?.delete("audit_verdicts", null, null)
         } else {
             fallbackDb?.delete("audit_verdicts", null, null)
+        }
+        refreshMemoryCachesSync()
+    }
+
+    override suspend fun deleteVerdicts(ids: List<String>) = withContext(ioDispatcher) {
+        if (ids.isEmpty()) return@withContext
+        ensureInitialized()
+        val inClause = ids.joinToString(",") { "?" }
+        val args = ids.toTypedArray()
+        if (useSqlCipher) {
+            cipherDb?.delete("audit_verdicts", "id IN ($inClause)", args)
+        } else {
+            fallbackDb?.delete("audit_verdicts", "id IN ($inClause)", args)
         }
         refreshMemoryCachesSync()
     }
@@ -426,6 +452,11 @@ class InMemoryAuditLogDataSource(
 
     override suspend fun clearHistory() {
         _history.value = emptyList()
+    }
+
+    override suspend fun deleteVerdicts(ids: List<String>) {
+        val idSet = ids.toSet()
+        _history.value = _history.value.filterNot { it.id in idSet }
     }
 
     override suspend fun enqueueTelemetry(event: TelemetryEvent) {
