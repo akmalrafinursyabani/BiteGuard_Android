@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -76,17 +77,23 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.SafetyLevel
+import com.biteguard.core.ui.localization.localizedDisplayName
+import com.biteguard.core.ui.localization.localizedExamples
+import com.biteguard.core.ui.localization.localizedDescription
+import com.biteguard.core.ui.localization.localizedLabel
 import com.biteguard.core.ui.components.BiteGuardAccordion
 import com.biteguard.core.ui.components.ClickableCapturedImageCard
 import com.biteguard.core.ui.components.FlaggedIngredientCard
@@ -220,8 +227,8 @@ fun DietaryProfileScreen(
         // Severe Allergens Accordion (Expanded by default for fast one-tap access, compact M3 chips)
         item {
             BiteGuardAccordion(
-                title = "Severe Allergen Alerts",
-                subtitle = "Triggers immediate DANGER alerts on labels",
+                title = stringResource(com.biteguard.core.ui.R.string.allergens_to_guard, state.profile.selectedAllergens.size),
+                subtitle = stringResource(com.biteguard.core.ui.R.string.allergens_section_desc),
                 badgeText = "${state.profile.selectedAllergens.size} active",
                 leadingIcon = Icons.Default.WarningAmber,
                 accentColor = semanticColors.danger.color,
@@ -240,7 +247,7 @@ fun DietaryProfileScreen(
                                 modifier = Modifier.heightIn(min = 44.dp),
                                 label = {
                                     Text(
-                                        text = allergen.displayName,
+                                        text = allergen.localizedDisplayName(),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -284,13 +291,13 @@ fun DietaryProfileScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "${allergen.displayName}: ",
+                                        text = "${allergen.localizedDisplayName()}: ",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = allergen.examples,
+                                        text = allergen.localizedExamples(),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.weight(1f)
@@ -306,8 +313,8 @@ fun DietaryProfileScreen(
         // Dietary & Health Goals Accordion (FR-01)
         item {
             BiteGuardAccordion(
-                title = "Dietary & Health Goals",
-                subtitle = "Flags hidden sugars, sodium & lifestyle conflicts",
+                title = stringResource(com.biteguard.core.ui.R.string.health_goals_title, state.profile.healthGoals.size),
+                subtitle = stringResource(com.biteguard.core.ui.R.string.health_goals_desc),
                 badgeText = "${state.profile.healthGoals.size} active",
                 leadingIcon = Icons.Default.HealthAndSafety,
                 accentColor = semanticColors.safe.color,
@@ -345,12 +352,12 @@ fun DietaryProfileScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = goal.displayName,
+                                        text = goal.localizedDisplayName(),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = goal.description,
+                                        text = goal.localizedDescription(),
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
@@ -360,6 +367,86 @@ fun DietaryProfileScreen(
                                     onCheckedChange = { onIntent(ProfileIntent.ToggleHealthGoal(goal)) }
                                 )
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Display Language Setting Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = semanticColors.info.colorContainer,
+                            contentColor = semanticColors.info.onColorContainer,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = stringResource(com.biteguard.core.ui.R.string.language_setting),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    val languages = listOf(
+                        "SYSTEM" to stringResource(com.biteguard.core.ui.R.string.language_system),
+                        "en" to stringResource(com.biteguard.core.ui.R.string.language_en),
+                        "in" to stringResource(com.biteguard.core.ui.R.string.language_in),
+                        "ko" to stringResource(com.biteguard.core.ui.R.string.language_ko)
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        languages.forEach { (code, label) ->
+                            val isSelected = state.profile.selectedLanguage.equals(code, ignoreCase = true)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onIntent(ProfileIntent.SetLanguage(code)) },
+                                modifier = Modifier.heightIn(min = 44.dp),
+                                label = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                    )
+                                },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                } else null
+                            )
                         }
                     }
                 }
@@ -395,13 +482,13 @@ fun DietaryProfileScreen(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Ultra High-Contrast Accessibility Mode",
+                            text = stringResource(com.biteguard.core.ui.R.string.high_contrast_setting),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = semanticColors.info.onColorContainer
                         )
                         Text(
-                            text = "Maximizes WCAG 2.1 AAA contrast ratios and thickens border signage.",
+                            text = stringResource(com.biteguard.core.ui.R.string.high_contrast_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = semanticColors.info.onColorContainer
                         )
@@ -506,14 +593,14 @@ fun ScanHistoryScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Scan History",
+                        text = stringResource(com.biteguard.core.ui.R.string.history_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.semantics { heading() }
                     )
                     Text(
-                        text = "${state.allHistory.size} saved scan(s) • Stored privately on your phone",
+                        text = stringResource(com.biteguard.core.ui.R.string.history_subtitle, state.allHistory.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -522,11 +609,11 @@ fun ScanHistoryScreen(
                 if (state.allHistory.isNotEmpty()) {
                     IconButton(
                         onClick = { onIntent(ProfileIntent.RequestClearHistory(true)) },
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "Clear all scan history",
+                            contentDescription = stringResource(com.biteguard.core.ui.R.string.btn_clear_all),
                             tint = semanticColors.danger.color,
                             modifier = Modifier.size(24.dp)
                         )
@@ -541,7 +628,7 @@ fun ScanHistoryScreen(
             onValueChange = { onIntent(ProfileIntent.UpdateSearchQuery(it)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            placeholder = { Text("Search ingredients or products") },
+            placeholder = { Text(stringResource(com.biteguard.core.ui.R.string.history_search_placeholder)) },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Search,
@@ -574,8 +661,8 @@ fun ScanHistoryScreen(
             FilterChip(
                 selected = state.selectedSafetyFilter == null,
                 onClick = { onIntent(ProfileIntent.FilterBySafetyLevel(null)) },
-                modifier = Modifier.heightIn(min = 36.dp),
-                label = { Text("All (${state.allHistory.size})", fontWeight = FontWeight.Bold) },
+                modifier = Modifier.heightIn(min = 40.dp),
+                label = { Text(stringResource(com.biteguard.core.ui.R.string.history_filter_all, state.allHistory.size), fontWeight = FontWeight.Bold) },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.FilterList,
@@ -592,10 +679,10 @@ fun ScanHistoryScreen(
                 FilterChip(
                     selected = isSelected,
                     onClick = { onIntent(ProfileIntent.FilterBySafetyLevel(level)) },
-                    modifier = Modifier.heightIn(min = 36.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
                     label = {
                         Text(
-                            text = "${level.label} ($count)",
+                            text = "${level.localizedLabel()} ($count)",
                             fontWeight = FontWeight.Bold
                         )
                     },
@@ -833,10 +920,10 @@ fun ScanHistoryScreen(
         AlertDialog(
             onDismissRequest = { onIntent(ProfileIntent.RequestClearHistory(false)) },
             title = {
-                Text("Clear Scan History?", fontWeight = FontWeight.Bold)
+                Text(stringResource(com.biteguard.core.ui.R.string.history_clear_dialog_title), fontWeight = FontWeight.Bold)
             },
             text = {
-                Text("This will permanently remove all ${state.allHistory.size} saved scan(s) from your phone.")
+                Text(stringResource(com.biteguard.core.ui.R.string.history_clear_dialog_desc))
             },
             confirmButton = {
                 Button(
@@ -846,12 +933,12 @@ fun ScanHistoryScreen(
                         contentColor = semanticColors.danger.onColor
                     )
                 ) {
-                    Text("Clear All", fontWeight = FontWeight.Bold)
+                    Text(stringResource(com.biteguard.core.ui.R.string.btn_clear_all), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { onIntent(ProfileIntent.RequestClearHistory(false)) }) {
-                    Text("Cancel")
+                    Text(stringResource(com.biteguard.core.ui.R.string.btn_cancel))
                 }
             }
         )
@@ -862,10 +949,10 @@ fun ScanHistoryScreen(
         AlertDialog(
             onDismissRequest = { onIntent(ProfileIntent.RequestBulkDelete(false)) },
             title = {
-                Text("Delete Selected Scans?", fontWeight = FontWeight.Bold)
+                Text(stringResource(com.biteguard.core.ui.R.string.history_bulk_delete_title), fontWeight = FontWeight.Bold)
             },
             text = {
-                Text("Are you sure you want to delete ${state.selectedIdsForBulkDelete.size} selected scan(s)? This cannot be undone.")
+                Text(stringResource(com.biteguard.core.ui.R.string.history_bulk_delete_desc, state.selectedIdsForBulkDelete.size))
             },
             confirmButton = {
                 Button(
@@ -875,12 +962,12 @@ fun ScanHistoryScreen(
                         contentColor = semanticColors.danger.onColor
                     )
                 ) {
-                    Text("Delete (${state.selectedIdsForBulkDelete.size})", fontWeight = FontWeight.Bold)
+                    Text("${stringResource(com.biteguard.core.ui.R.string.btn_delete)} (${state.selectedIdsForBulkDelete.size})", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { onIntent(ProfileIntent.RequestBulkDelete(false)) }) {
-                    Text("Cancel")
+                    Text(stringResource(com.biteguard.core.ui.R.string.btn_cancel))
                 }
             }
         )

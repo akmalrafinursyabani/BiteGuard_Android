@@ -15,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.WarningAmber
@@ -53,6 +55,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -78,6 +82,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -88,6 +93,7 @@ import com.biteguard.core.ui.components.BiteGuardAccordion
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.RadialModernAnimatedBackground
 import com.biteguard.core.ui.components.RobotLottieAnimation
+import com.biteguard.core.ui.localization.localizedDisplayName
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
 
 /**
@@ -102,6 +108,8 @@ fun BiteGuardOnboardingFlow(
     initialName: String,
     initialAllergens: Set<Allergen>,
     initialHealthGoals: Set<HealthGoal>,
+    selectedLanguage: String = "SYSTEM",
+    onSelectLanguage: (String) -> Unit = {},
     onCompleteOnboarding: (userName: String, allergens: Set<Allergen>, healthGoals: Set<HealthGoal>) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -126,11 +134,22 @@ fun BiteGuardOnboardingFlow(
                     .padding(horizontal = 20.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Modern M3 Step Progress Pill
-                OnboardingStepIndicator(
-                    currentStep = currentStep,
-                    totalSteps = 2
-                )
+                // Top Header Bar: Step Progress Pill & Language Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    OnboardingStepIndicator(
+                        currentStep = currentStep,
+                        totalSteps = 2
+                    )
+
+                    OnboardingLanguagePill(
+                        selectedLanguage = selectedLanguage,
+                        onSelectLanguage = onSelectLanguage
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -155,7 +174,9 @@ fun BiteGuardOnboardingFlow(
                     when (step) {
                         0 -> WelcomeNameStep(
                             userName = userName,
+                            selectedLanguage = selectedLanguage,
                             onUserNameChange = { userName = it },
+                            onSelectLanguage = onSelectLanguage,
                             onNextStep = { currentStep = 1 }
                         )
 
@@ -217,7 +238,7 @@ private fun OnboardingStepIndicator(
                 modifier = Modifier.size(16.dp)
             )
             Text(
-                text = "Step ${currentStep + 1} of $totalSteps",
+                text = stringResource(com.biteguard.core.ui.R.string.onboarding_step_format, currentStep + 1, totalSteps),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -226,15 +247,102 @@ private fun OnboardingStepIndicator(
     }
 }
 
+@Composable
+private fun OnboardingLanguagePill(
+    selectedLanguage: String,
+    onSelectLanguage: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val semanticColors = LocalBiteGuardSemanticColors.current
+
+    val currentLabel = when (selectedLanguage.lowercase()) {
+        "en" -> "English"
+        "in" -> "Indonesia"
+        "ko" -> "한국어"
+        else -> stringResource(com.biteguard.core.ui.R.string.language_system)
+    }
+
+    Box(modifier = modifier) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier
+                .heightIn(min = 36.dp)
+                .clickable { expanded = true }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = stringResource(com.biteguard.core.ui.R.string.language_setting),
+                    tint = semanticColors.info.color,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = currentLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            val options = listOf(
+                "SYSTEM" to stringResource(com.biteguard.core.ui.R.string.language_system),
+                "en" to stringResource(com.biteguard.core.ui.R.string.language_en),
+                "in" to stringResource(com.biteguard.core.ui.R.string.language_in),
+                "ko" to stringResource(com.biteguard.core.ui.R.string.language_ko)
+            )
+            options.forEach { (code, label) ->
+                val isSelected = selectedLanguage.equals(code, ignoreCase = true)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = label,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = if (isSelected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = semanticColors.safe.color,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else null,
+                    onClick = {
+                        expanded = false
+                        onSelectLanguage(code)
+                    }
+                )
+            }
+        }
+    }
+}
+
 /**
  * Screen 1: Adaptive Welcome Screen with vertical structure:
- * [Welcome Message] -> robot.json Lottie -> [Ready to make every bite safer and healthier?] + Name Input
+ * [Welcome Message] -> robot.json Lottie -> [Language Options & Ready to make every bite safer and healthier?] + Name Input
  * Adapts sizing and spacing dynamically to screen height/width and system theme (Light, Dark, High-Contrast).
  */
 @Composable
 private fun WelcomeNameStep(
     userName: String,
+    selectedLanguage: String,
     onUserNameChange: (String) -> Unit,
+    onSelectLanguage: (String) -> Unit,
     onNextStep: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -261,13 +369,13 @@ private fun WelcomeNameStep(
         val isCompactHeight = maxHeight < 640.dp
         val isShortHeight = maxHeight < 520.dp
         val robotContainerSize: Dp = when {
-            isShortHeight -> 128.dp
-            isCompactHeight -> 164.dp
-            maxHeight > 820.dp -> 224.dp
-            else -> 196.dp
+            isShortHeight -> 110.dp
+            isCompactHeight -> 144.dp
+            maxHeight > 820.dp -> 200.dp
+            else -> 170.dp
         }
-        val verticalSpacing: Dp = if (isCompactHeight) 10.dp else 16.dp
-        val cardPadding: Dp = if (isCompactHeight) 16.dp else 20.dp
+        val verticalSpacing: Dp = if (isCompactHeight) 8.dp else 14.dp
+        val cardPadding: Dp = if (isCompactHeight) 14.dp else 18.dp
 
         Column(
             modifier = Modifier
@@ -287,7 +395,7 @@ private fun WelcomeNameStep(
                     modifier = Modifier.padding(top = 4.dp)
                 ) {
                     Text(
-                        text = "Welcome to BiteGuard AI",
+                        text = stringResource(com.biteguard.core.ui.R.string.onboarding_welcome),
                         style = if (isCompactHeight) {
                             MaterialTheme.typography.headlineSmall
                         } else {
@@ -299,7 +407,7 @@ private fun WelcomeNameStep(
                         modifier = Modifier.semantics { heading() }
                     )
                     Text(
-                        text = "Your personal AI label auditor that spots hidden allergens and chemical derivatives in real time.",
+                        text = stringResource(com.biteguard.core.ui.R.string.onboarding_subtitle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -337,7 +445,7 @@ private fun WelcomeNameStep(
                     RobotLottieAnimation(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(if (isCompactHeight) 12.dp else 16.dp),
+                            .padding(if (isCompactHeight) 10.dp else 14.dp),
                         contentDescriptionLabel = "BiteGuard AI Welcome Robot Animation"
                     )
                 }
@@ -345,7 +453,7 @@ private fun WelcomeNameStep(
 
             Spacer(modifier = Modifier.height(verticalSpacing))
 
-            // 3. [Ready to make you healthier / Name Input & CTA]
+            // 3. [Language Options + Name Input & CTA Card]
             AnimatedVisibility(
                 visible = appeared,
                 enter = fadeIn(tween(550)) + slideInVertically(tween(550)) { it / 3 }
@@ -370,7 +478,7 @@ private fun WelcomeNameStep(
                         verticalArrangement = Arrangement.spacedBy(if (isCompactHeight) 10.dp else 14.dp)
                     ) {
                         Text(
-                            text = "Ready to make every bite safer and healthier?",
+                            text = stringResource(com.biteguard.core.ui.R.string.onboarding_ready_title),
                             style = if (isCompactHeight) {
                                 MaterialTheme.typography.titleMedium
                             } else {
@@ -382,19 +490,94 @@ private fun WelcomeNameStep(
                         )
 
                         Text(
-                            text = "Tell us your name so we can personalize your on-device dietary guardian.",
+                            text = stringResource(com.biteguard.core.ui.R.string.onboarding_ready_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
+
+                        // Language Selector Section
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = semanticColors.info.color,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(com.biteguard.core.ui.R.string.onboarding_select_language),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            val languages = listOf(
+                                "SYSTEM" to stringResource(com.biteguard.core.ui.R.string.language_system),
+                                "en" to stringResource(com.biteguard.core.ui.R.string.language_en),
+                                "in" to stringResource(com.biteguard.core.ui.R.string.language_in),
+                                "ko" to stringResource(com.biteguard.core.ui.R.string.language_ko)
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                languages.forEach { (code, label) ->
+                                    val isSelected = selectedLanguage.equals(code, ignoreCase = true)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { onSelectLanguage(code) },
+                                        modifier = Modifier.heightIn(min = 40.dp),
+                                        label = {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                            )
+                                        },
+                                        leadingIcon = if (isSelected) {
+                                            {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Selected",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else null,
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = semanticColors.safe.colorContainer,
+                                            selectedLabelColor = semanticColors.safe.onColorContainer,
+                                            selectedLeadingIconColor = semanticColors.safe.onColorContainer
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = isSelected,
+                                            borderColor = MaterialTheme.colorScheme.outlineVariant,
+                                            selectedBorderColor = semanticColors.safe.color,
+                                            selectedBorderWidth = 1.5.dp
+                                        )
+                                    )
+                                }
+                            }
+                        }
 
                         OutlinedTextField(
                             value = userName,
                             onValueChange = onUserNameChange,
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
-                            label = { Text("Your Name") },
-                            placeholder = { Text("e.g., Alex") },
+                            label = { Text(stringResource(com.biteguard.core.ui.R.string.onboarding_name_label)) },
+                            placeholder = { Text(stringResource(com.biteguard.core.ui.R.string.onboarding_name_placeholder)) },
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.Person,
@@ -442,7 +625,7 @@ private fun WelcomeNameStep(
                             )
                         ) {
                             Text(
-                                text = "Continue to Allergen Setup",
+                                text = stringResource(com.biteguard.core.ui.R.string.onboarding_btn_continue_allergen),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold
                             )
@@ -490,14 +673,14 @@ private fun PickAllergiesStep(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Hi $displayName, pick your allergies",
+                    text = stringResource(com.biteguard.core.ui.R.string.onboarding_pick_allergies_format, displayName),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
-                    text = "Select any allergens you need BiteGuard AI to flag immediately, or skip if you have none.",
+                    text = stringResource(com.biteguard.core.ui.R.string.onboarding_pick_allergies_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -533,7 +716,7 @@ private fun PickAllergiesStep(
                                 tint = semanticColors.danger.color
                             )
                             Text(
-                                text = "Allergens to Guard (${selectedAllergens.size})",
+                                text = stringResource(com.biteguard.core.ui.R.string.allergens_to_guard, selectedAllergens.size),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -544,7 +727,7 @@ private fun PickAllergiesStep(
                             FilterChip(
                                 selected = false,
                                 onClick = onClearAllergens,
-                                label = { Text("Clear All", style = MaterialTheme.typography.labelSmall) }
+                                label = { Text(stringResource(com.biteguard.core.ui.R.string.btn_clear_all), style = MaterialTheme.typography.labelSmall) }
                             )
                         }
                     }
@@ -561,7 +744,7 @@ private fun PickAllergiesStep(
                                 modifier = Modifier.heightIn(min = 44.dp),
                                 label = {
                                     Text(
-                                        text = allergen.displayName,
+                                        text = allergen.localizedDisplayName(),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -594,9 +777,13 @@ private fun PickAllergiesStep(
 
             // Optional M3 Accordion for Dietary & Health Goals so the screen stays clean
             BiteGuardAccordion(
-                title = "Dietary & Health Goals (Optional)",
-                subtitle = "Low Sugar, Halal, Vegan, Keto & more",
-                badgeText = if (selectedGoals.isNotEmpty()) "${selectedGoals.size} picked" else "Optional",
+                title = stringResource(com.biteguard.core.ui.R.string.onboarding_goals_accordion_title),
+                subtitle = stringResource(com.biteguard.core.ui.R.string.onboarding_goals_accordion_subtitle),
+                badgeText = if (selectedGoals.isNotEmpty()) {
+                    stringResource(com.biteguard.core.ui.R.string.onboarding_goals_picked_format, selectedGoals.size)
+                } else {
+                    stringResource(com.biteguard.core.ui.R.string.onboarding_optional)
+                },
                 leadingIcon = Icons.Default.HealthAndSafety,
                 accentColor = semanticColors.safe.color,
                 initiallyExpanded = false
@@ -613,7 +800,7 @@ private fun PickAllergiesStep(
                             modifier = Modifier.heightIn(min = 42.dp),
                             label = {
                                 Text(
-                                    text = goal.displayName,
+                                    text = goal.localizedDisplayName(),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -638,8 +825,8 @@ private fun PickAllergiesStep(
 
             // Medical Disclaimer Accordion
             BiteGuardAccordion(
-                title = "Safety & Medical Disclaimer",
-                subtitle = "Important informational decision-support notice",
+                title = stringResource(com.biteguard.core.ui.R.string.onboarding_disclaimer_accordion_title),
+                subtitle = stringResource(com.biteguard.core.ui.R.string.onboarding_disclaimer_accordion_subtitle),
                 leadingIcon = Icons.Default.Info,
                 accentColor = semanticColors.info.color,
                 initiallyExpanded = false
@@ -666,7 +853,7 @@ private fun PickAllergiesStep(
                     contentDescription = "Back to welcome screen"
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Back", fontWeight = FontWeight.Bold)
+                Text(stringResource(com.biteguard.core.ui.R.string.onboarding_back), fontWeight = FontWeight.Bold)
             }
 
             Button(
@@ -682,9 +869,9 @@ private fun PickAllergiesStep(
             ) {
                 Text(
                     text = if (selectedAllergens.isNotEmpty()) {
-                        "Start Guarding (${selectedAllergens.size})"
+                        stringResource(com.biteguard.core.ui.R.string.onboarding_start_guarding, selectedAllergens.size)
                     } else {
-                        "Start Scanning"
+                        stringResource(com.biteguard.core.ui.R.string.onboarding_start_scanning)
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold

@@ -10,7 +10,8 @@ data class UserDietaryProfile(
     val selectedAllergens: Set<Allergen> = emptySet(),
     val healthGoals: Set<HealthGoal> = emptySet(),
     val lastUpdated: Instant = Instant.now(),
-    val highContrastMode: Boolean = false
+    val highContrastMode: Boolean = false,
+    val selectedLanguage: String = "SYSTEM"
 )
 
 enum class Allergen(val displayName: String, val examples: String) {

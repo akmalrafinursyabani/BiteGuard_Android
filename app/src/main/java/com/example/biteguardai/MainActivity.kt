@@ -44,7 +44,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import com.biteguard.core.data.profile.ProfileRepository
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.HealthGoal
@@ -52,6 +59,8 @@ import com.biteguard.core.model.SafetyLevel
 import com.biteguard.core.model.UserDietaryProfile
 import com.biteguard.core.ui.components.MedicalDisclaimerBanner
 import com.biteguard.core.ui.components.SafetyVerdictBanner
+import com.biteguard.core.ui.localization.getLocalizedConfiguration
+import com.biteguard.core.ui.localization.getLocalizedContext
 import com.biteguard.feature.profile.DietaryProfileScreen
 import com.biteguard.feature.profile.ProfileViewModel
 import com.biteguard.feature.profile.ScanHistoryScreen
@@ -65,13 +74,25 @@ import org.koin.android.ext.android.inject
 import org.koin.androidx.compose.koinViewModel
 
 enum class BiteGuardDestination(
-    val title: String,
+    val titleRes: Int,
     val icon: ImageVector,
-    val contentDesc: String
+    val descRes: Int
 ) {
-    SCANNER("Scan Label", Icons.Default.DocumentScanner, "Scan package ingredient label"),
-    HISTORY("Audit Log", Icons.Default.History, "View encrypted scan history"),
-    PROFILE("My Profile", Icons.Default.Person, "Configure allergens and health goals")
+    SCANNER(
+        com.biteguard.core.ui.R.string.nav_scanner,
+        Icons.Default.DocumentScanner,
+        com.biteguard.core.ui.R.string.nav_scanner_desc
+    ),
+    HISTORY(
+        com.biteguard.core.ui.R.string.nav_history,
+        Icons.Default.History,
+        com.biteguard.core.ui.R.string.nav_history_desc
+    ),
+    PROFILE(
+        com.biteguard.core.ui.R.string.nav_profile,
+        Icons.Default.Person,
+        com.biteguard.core.ui.R.string.nav_profile_desc
+    )
 }
 
 class MainActivity : ComponentActivity() {
@@ -97,28 +118,51 @@ class MainActivity : ComponentActivity() {
             val isOnboarded = sessionOnboardingCompleted || onboardingAcceptedFromFlow || profile.userName.isNotBlank()
             val scope = rememberCoroutineScope()
 
-            BiteGuardAITheme(
-                highContrast = profile.highContrastMode
+            val baseConfig = LocalConfiguration.current
+            val baseContext = LocalContext.current
+            val activityResultRegistryOwner = LocalActivityResultRegistryOwner.current ?: this
+            val onBackPressedDispatcherOwner = LocalOnBackPressedDispatcherOwner.current ?: this
+            val localizedConfig = androidx.compose.runtime.remember(baseConfig, profile.selectedLanguage) {
+                getLocalizedConfiguration(baseConfig, profile.selectedLanguage)
+            }
+            val localizedContext = androidx.compose.runtime.remember(baseContext, profile.selectedLanguage) {
+                getLocalizedContext(baseContext, profile.selectedLanguage)
+            }
+
+            CompositionLocalProvider(
+                LocalConfiguration provides localizedConfig,
+                LocalContext provides localizedContext,
+                LocalActivityResultRegistryOwner provides activityResultRegistryOwner,
+                LocalOnBackPressedDispatcherOwner provides onBackPressedDispatcherOwner
             ) {
-                BiteGuardAppShell(
-                    profile = profile,
-                    onboardingAccepted = isOnboarded,
-                    onToggleHighContrast = {
-                        scope.launch {
-                            profileRepository.setHighContrastMode(!profile.highContrastMode)
+                BiteGuardAITheme(
+                    highContrast = profile.highContrastMode
+                ) {
+                    BiteGuardAppShell(
+                        profile = profile,
+                        onboardingAccepted = isOnboarded,
+                        onToggleHighContrast = {
+                            scope.launch {
+                                profileRepository.setHighContrastMode(!profile.highContrastMode)
+                            }
+                        },
+                        onSelectLanguage = { lang ->
+                            scope.launch {
+                                profileRepository.setLanguage(lang)
+                            }
+                        },
+                        onCompleteOnboarding = { userName, allergens, goals ->
+                            sessionOnboardingCompleted = true
+                            scope.launch {
+                                profileRepository.completeOnboarding(
+                                    userName = userName,
+                                    allergens = allergens,
+                                    healthGoals = goals
+                                )
+                            }
                         }
-                    },
-                    onCompleteOnboarding = { userName, allergens, goals ->
-                        sessionOnboardingCompleted = true
-                        scope.launch {
-                            profileRepository.completeOnboarding(
-                                userName = userName,
-                                allergens = allergens,
-                                healthGoals = goals
-                            )
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
     }
@@ -130,6 +174,7 @@ fun BiteGuardAppShell(
     profile: UserDietaryProfile,
     onboardingAccepted: Boolean,
     onToggleHighContrast: () -> Unit,
+    onSelectLanguage: (String) -> Unit,
     onCompleteOnboarding: (String, Set<Allergen>, Set<HealthGoal>) -> Unit
 ) {
     Crossfade(
@@ -142,6 +187,8 @@ fun BiteGuardAppShell(
                 initialName = profile.userName,
                 initialAllergens = profile.selectedAllergens,
                 initialHealthGoals = profile.healthGoals,
+                selectedLanguage = profile.selectedLanguage,
+                onSelectLanguage = onSelectLanguage,
                 onCompleteOnboarding = onCompleteOnboarding
             )
         } else {
@@ -184,18 +231,20 @@ private fun BiteGuardMainScaffold(
                         )
                         Column {
                             Text(
-                                text = "BiteGuard AI",
+                                text = stringResource(com.biteguard.core.ui.R.string.app_name),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold
                             )
                             Text(
                                 text = if (profile.userName.isNotBlank()) {
-                                    "Guarding ${profile.userName} • Smart Food Auditor"
+                                    stringResource(com.biteguard.core.ui.R.string.header_guarding, profile.userName)
                                 } else {
-                                    "Smart Food & Allergen Auditor"
+                                    stringResource(com.biteguard.core.ui.R.string.header_subtitle)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -248,13 +297,15 @@ private fun BiteGuardMainScaffold(
                         icon = {
                             Icon(
                                 imageVector = dest.icon,
-                                contentDescription = dest.contentDesc
+                                contentDescription = stringResource(dest.descRes)
                             )
                         },
                         label = {
                             Text(
-                                text = dest.title,
-                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium
+                                text = stringResource(dest.titleRes),
+                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     )

@@ -40,6 +40,7 @@ sealed interface ProfileIntent {
     data class ToggleAllergen(val allergen: Allergen) : ProfileIntent
     data class ToggleHealthGoal(val goal: HealthGoal) : ProfileIntent
     data class SetHighContrast(val enabled: Boolean) : ProfileIntent
+    data class SetLanguage(val languageCode: String) : ProfileIntent
     data class UpdateSearchQuery(val query: String) : ProfileIntent
     data class FilterBySafetyLevel(val level: SafetyLevel?) : ProfileIntent
     data class SelectVerdictDetail(val verdict: AuditVerdict?) : ProfileIntent
@@ -141,6 +142,9 @@ class ProfileViewModel(
             }
             is ProfileIntent.SetHighContrast -> viewModelScope.launch {
                 profileRepository.setHighContrastMode(intent.enabled)
+            }
+            is ProfileIntent.SetLanguage -> viewModelScope.launch {
+                profileRepository.setLanguage(intent.languageCode)
             }
             is ProfileIntent.UpdateSearchQuery -> {
                 searchQueryFlow.value = intent.query

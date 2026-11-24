@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import android.graphics.Rect
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -129,6 +130,9 @@ import com.biteguard.core.model.SafetyLevel
 import com.biteguard.core.model.Severity
 import com.biteguard.core.model.UserFeedback
 import com.biteguard.core.ui.R
+import com.biteguard.core.ui.localization.localizedActionTitle
+import com.biteguard.core.ui.localization.localizedLabel
+import androidx.compose.ui.res.stringResource
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
 import kotlin.math.cos
 import kotlin.math.sin
@@ -198,12 +202,13 @@ fun SafetyVerdictBanner(
             }
 
             Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = safetyLevel.label,
+                        text = safetyLevel.localizedLabel(),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = contentColor
@@ -215,7 +220,7 @@ fun SafetyVerdictBanner(
                             contentColor = family.onColor
                         ) {
                             Text(
-                                text = "LOCAL MATCH",
+                                text = stringResource(R.string.local_match),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -224,7 +229,7 @@ fun SafetyVerdictBanner(
                     }
                 }
                 Text(
-                    text = safetyLevel.shortActionTitle,
+                    text = safetyLevel.localizedActionTitle(),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor
@@ -271,7 +276,7 @@ fun SafetyLevelChip(
                 tint = family.onColorContainer
             )
             Text(
-                text = safetyLevel.label,
+                text = safetyLevel.localizedLabel(),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = family.onColorContainer
@@ -643,7 +648,7 @@ fun FlaggedIngredientCard(
                         contentColor = family.onColor
                     ) {
                         Text(
-                            text = ingredient.severity.label.uppercase(),
+                            text = ingredient.severity.localizedLabel().uppercase(),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -780,7 +785,7 @@ fun VerdictFeedbackRow(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = if (selectedFeedback == null) "Was this verdict accurate?" else "Feedback queued for telemetry",
+                    text = if (selectedFeedback == null) stringResource(R.string.was_verdict_accurate) else stringResource(R.string.feedback_queued),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -804,6 +809,7 @@ fun VerdictFeedbackRow(
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (upSelected) semanticColors.safe.colorContainer else MaterialTheme.colorScheme.surface,
@@ -820,7 +826,11 @@ fun VerdictFeedbackRow(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Helpful", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = stringResource(R.string.btn_helpful),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
                 }
 
                 OutlinedButton(
@@ -828,6 +838,7 @@ fun VerdictFeedbackRow(
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (downSelected) semanticColors.danger.colorContainer else MaterialTheme.colorScheme.surface,
@@ -844,7 +855,11 @@ fun VerdictFeedbackRow(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Report", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = stringResource(R.string.btn_report),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
                 }
             }
         }
@@ -862,7 +877,7 @@ fun MedicalDisclaimerBanner(
         modifier = modifier
             .fillMaxWidth()
             .semantics {
-                contentDescription = "Medical Disclaimer: BiteGuard AI is an informational decision-support tool. It does not replace professional medical advice, diagnosis, or official product package verification."
+                contentDescription = "Medical Disclaimer notice"
             },
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -883,7 +898,7 @@ fun MedicalDisclaimerBanner(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "BiteGuard AI is an informational decision-support tool. It does not replace professional medical advice, diagnosis, or official product package verification.",
+                text = stringResource(R.string.medical_disclaimer),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

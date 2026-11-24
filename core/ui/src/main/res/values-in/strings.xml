@@ -1,0 +1,153 @@
+<resources>
+    <!-- App & General -->
+    <string name="app_name">BiteGuard AI</string>
+    <string name="header_subtitle">Auditor Cerdas Makanan &amp; Alergen</string>
+    <string name="header_guarding">Melindungi %1$s • Auditor Makanan</string>
+
+    <!-- Navigation -->
+    <string name="nav_scanner">Pindai Label</string>
+    <string name="nav_scanner_desc">Pindai label komposisi produk makanan</string>
+    <string name="nav_history">Riwayat Audit</string>
+    <string name="nav_history_desc">Lihat riwayat pemindaian terenkripsi</string>
+    <string name="nav_profile">Profil Saya</string>
+    <string name="nav_profile_desc">Atur alergen dan target kesehatan</string>
+
+    <!-- Safety Levels -->
+    <string name="safety_safe_label">AMAN</string>
+    <string name="safety_safe_title">Aman untuk Profil Anda</string>
+    <string name="safety_caution_label">HATI-HATI</string>
+    <string name="safety_caution_title">Periksa Bahan yang Ditandai</string>
+    <string name="safety_danger_label">BAHAYA</string>
+    <string name="safety_danger_title">Jangan Dikonsumsi — Konflik Ditemukan</string>
+    <string name="local_match">HASIL LOKAL</string>
+
+    <!-- Scanner Stage & Actions -->
+    <string name="choose_text_blocks">Pilih Blok Teks untuk Dipindai</string>
+    <string name="blocks_selected_format">%1$d dari %2$d blok terdeteksi dipilih</string>
+    <string name="retake_photo">Foto Ulang</string>
+    <string name="select_all">Pilih Semua</string>
+    <string name="clear_all">Hapus Pilihan</string>
+    <string name="edit_text">Edit Teks</string>
+    <string name="scan_selected_blocks">Pindai Blok Terpilih (%1$d)</string>
+    <string name="scan_next_package">Pindai Kemasan Berikutnya</string>
+    <string name="btn_ready_capture">SIAP — TANGKAP &amp; PILIH BLOK</string>
+    <string name="btn_capture_choose">TANGKAP &amp; PILIH BLOK TEKS</string>
+    <string name="btn_scan_label">PINDAI LABEL KEMASAN</string>
+    <string name="btn_manual_text">Teks Manual</string>
+    <string name="btn_demo_sample">Sampel Demo</string>
+
+    <!-- Camera Permission -->
+    <string name="camera_access_needed">Akses Kamera Diperlukan</string>
+    <string name="camera_scanner_subtitle">Pemindai Label OCR Langsung</string>
+    <string name="camera_access_desc">Berikan izin kamera untuk memindai bahan kemasan, atau uji langsung menggunakan teks manual atau sampel di bawah ini.</string>
+    <string name="grant_camera_permission">Berikan Izin Kamera</string>
+    <string name="run_sample_audit">Jalankan Audit Sampel</string>
+    <string name="enter_manual_text">Masukkan Teks Manual</string>
+
+    <!-- Audit Result -->
+    <string name="label_audit_result">Hasil Audit Label</string>
+    <string name="back_to_camera">Kembali ke Kamera</string>
+    <string name="filtered_and_flagged_title">Kata Tersaring &amp; Bahan Ditandai (%1$d)</string>
+    <string name="more_flagged_ingredients">Bahan Ditandai Lainnya</string>
+    <string name="more_flagged_subtitle">Ketuk untuk melihat %1$d item tambahan</string>
+    <string name="extracted_ocr_disclaimer">Teks OCR &amp; Penafian Medis</string>
+    <string name="extracted_ocr_subtitle">Periksa teks kemasan asli dengan kata tersaring</string>
+    <string name="was_verdict_accurate">Apakah hasil audit ini akurat?</string>
+    <string name="feedback_queued">Umpan balik tersimpan untuk telemetri</string>
+    <string name="btn_helpful">Membantu</string>
+    <string name="btn_report">Laporkan</string>
+    <string name="medical_disclaimer">BiteGuard AI adalah alat bantu pendukung keputusan informasi. Alat ini tidak menggantikan nasihat medis profesional, diagnosis, atau verifikasi kemasan produk resmi.</string>
+
+    <!-- Allergens -->
+    <string name="allergen_peanuts">Kacang Tanah</string>
+    <string name="allergen_peanuts_ex">Minyak kacang, kacang tanah, tepung kacang</string>
+    <string name="allergen_tree_nuts">Kacang Pohon</string>
+    <string name="allergen_tree_nuts_ex">Almond, mete, kenari, hazelnut, praline</string>
+    <string name="allergen_dairy">Susu &amp; Olahan</string>
+    <string name="allergen_dairy_ex">Kasein, whey, laktosa, minyak samin, ghee</string>
+    <string name="allergen_gluten">Gluten</string>
+    <string name="allergen_gluten_ex">Gandum, jelai, gandum hitam, malt, seitan</string>
+    <string name="allergen_shellfish">Kerang &amp; Krustasea</string>
+    <string name="allergen_shellfish_ex">Udang, kepiting, lobster, rebon, krill</string>
+    <string name="allergen_soy">Kedelai</string>
+    <string name="allergen_soy_ex">Lesitin kedelai, tahu, edamame, glycine max</string>
+    <string name="allergen_eggs">Telur</string>
+    <string name="allergen_eggs_ex">Albumin, globulin, lisozim, mayones</string>
+    <string name="allergen_fish">Fish / Ikan</string>
+    <string name="allergen_fish_ex">Ikan teri, kecap ikan, surimi, minyak ikan</string>
+    <string name="allergen_sesame">Wijen</string>
+    <string name="allergen_sesame_ex">Tahini, minyak wijen, halva</string>
+
+    <!-- Health Goals -->
+    <string name="goal_low_sugar">Rendah Gula</string>
+    <string name="goal_low_sugar_desc">Menandai sirup jagung fruktosa tinggi, maltodekstrin, sukrosa</string>
+    <string name="goal_low_sodium">Rendah Natrium</string>
+    <string name="goal_low_sodium_desc">Menandai MSG, garam berlebih &amp; senyawa natrium tinggi</string>
+    <string name="goal_halal">Halal</string>
+    <string name="goal_halal_desc">Menandai turunan babi/lemak babi, gelatin, alkohol/enzim non-halal</string>
+    <string name="goal_vegan">Vegan</string>
+    <string name="goal_vegan_desc">Menandai semua bahan hewani termasuk susu, telur, madu, karmin</string>
+    <string name="goal_vegetarian">Vegetarian</string>
+    <string name="goal_vegetarian_desc">Menandai daging merah, unggas, ikan, lemak hewani, rennet</string>
+    <string name="goal_keto">Ramah Keto</string>
+    <string name="goal_keto_desc">Menandai pati, biji-bijian olahan, gula tambahan, pengisi karbohidrat</string>
+
+    <!-- Severity -->
+    <string name="severity_high">Risiko Tinggi</string>
+    <string name="severity_medium">Risiko Sedang</string>
+    <string name="severity_low">Risiko Rendah / Info</string>
+
+    <!-- Profile & Settings -->
+    <string name="profile_title">Profil Diet &amp; Kesehatan</string>
+    <string name="profile_desc">Preferensi ini diperiksa secara offline di ponsel Anda dan memandu auditor AI.</string>
+    <string name="allergens_to_guard">Alergen yang Dijaga (%1$d)</string>
+    <string name="allergens_section_desc">Pilih bahan yang memicu reaksi alergi atau efek buruk bagi Anda.</string>
+    <string name="health_goals_title">Target Kesehatan &amp; Pola Makan (%1$d)</string>
+    <string name="health_goals_desc">Pola makan aktif memprioritaskan peringatan meskipun bukan alergen.</string>
+    <string name="language_setting">Bahasa Tampilan</string>
+    <string name="language_system">Default Sistem</string>
+    <string name="language_en">English</string>
+    <string name="language_in">Bahasa Indonesia</string>
+    <string name="language_ko">한국어 (Korean)</string>
+    <string name="high_contrast_setting">Mode Kontras Tinggi</string>
+    <string name="high_contrast_desc">Meningkatkan keterbacaan teks dan ketegasan garis tepi elemen</string>
+
+    <!-- Scan History -->
+    <string name="history_title">Riwayat Pindai</string>
+    <string name="history_subtitle">%1$d pemindaian tersimpan • Disimpan secara privat di ponsel Anda</string>
+    <string name="history_search_placeholder">Cari nama produk atau bahan yang ditandai…</string>
+    <string name="history_empty_title">Belum Ada Riwayat Pemindaian</string>
+    <string name="history_empty_desc">Arahkan kamera ke kemasan makanan atau coba sampel demo di tab pemindai.</string>
+    <string name="history_filter_all">Semua (%1$d)</string>
+    <string name="history_clear_dialog_title">Hapus Riwayat Pindai?</string>
+    <string name="history_clear_dialog_desc">Tindakan ini menghapus permanen seluruh riwayat pemindaian dari perangkat ini.</string>
+    <string name="history_bulk_delete_title">Hapus Pindai Terpilih?</string>
+    <string name="history_bulk_delete_desc">Hapus permanen %1$d catatan pemindaian terpilih dari perangkat Anda?</string>
+    <string name="btn_cancel">Batal</string>
+    <string name="btn_delete">Hapus</string>
+    <string name="btn_clear_all">Hapus Semua</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">Selamat Datang di BiteGuard AI</string>
+    <string name="onboarding_subtitle">Auditor label AI pribadi Anda yang mendeteksi alergen tersembunyi dan turunan kimia secara real time.</string>
+    <string name="onboarding_name_prompt">Siapa nama panggilan Anda?</string>
+    <string name="onboarding_name_placeholder">contoh: Budi</string>
+    <string name="onboarding_name_label">Nama Anda</string>
+    <string name="onboarding_ready_title">Siap membuat setiap gigitan lebih aman dan sehat?</string>
+    <string name="onboarding_ready_subtitle">Beri tahu nama Anda agar kami dapat mempersonalisasi perlindungan diet Anda.</string>
+    <string name="onboarding_continue">Lanjutkan</string>
+    <string name="onboarding_btn_continue_allergen">Lanjut ke Pengaturan Alergen</string>
+    <string name="onboarding_pick_allergies_format">Halo %1$s, pilih alergi Anda</string>
+    <string name="onboarding_pick_allergies_desc">Pilih alergen apa pun yang harus segera ditandai oleh BiteGuard AI, atau lewati jika tidak ada.</string>
+    <string name="onboarding_goals_accordion_title">Target Diet &amp; Kesehatan (Opsional)</string>
+    <string name="onboarding_goals_accordion_subtitle">Rendah Gula, Halal, Vegan, Keto &amp; lainnya</string>
+    <string name="onboarding_goals_picked_format">%1$d dipilih</string>
+    <string name="onboarding_optional">Opsional</string>
+    <string name="onboarding_disclaimer_accordion_title">Penafian Keamanan &amp; Medis</string>
+    <string name="onboarding_disclaimer_accordion_subtitle">Pemberitahuan penting pendukung keputusan informasi</string>
+    <string name="onboarding_start_guarding">Mulai Lindungi (%1$d)</string>
+    <string name="onboarding_start_scanning">Mulai Memindai</string>
+    <string name="onboarding_back">Kembali</string>
+    <string name="onboarding_step_format">Langkah %1$d dari %2$d</string>
+    <string name="onboarding_select_language">Pilih Bahasa</string>
+</resources>
