@@ -38,6 +38,7 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    api(project(":core:domain"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
@@ -45,7 +46,6 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.sqlcipher.android)
     implementation(libs.androidx.sqlite.ktx)
-    implementation(libs.google.generativeai)
     implementation(libs.koin.core)
     implementation(libs.koin.android)
 

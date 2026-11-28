@@ -13,83 +13,108 @@
 
 **BiteGuard AI** is a privacy-first, multimodal Android decision-support companion that helps shoppers with severe food allergies and dietary goals audit product ingredient labels in real time.
 
-Combining **CameraX + ML Kit v2 on-device OCR**, **Google Gemini 3.8 Flash streaming multimodal reasoning** (with automated cascading fallback to `gemini-3.5-flash-lite` and `gemini-2.5-flash`), and a **100% deterministic offline chemical-derivative rule engine**, BiteGuard AI ensures you never miss hidden allergens—even in grocery store dead zones without internet connectivity.
+Combining **CameraX + ML Kit v2 on-device OCR**, **Google Gemini 3.8 Flash streaming multimodal reasoning** (with automated cascading fallback to `gemini-3.5-flash-lite` and `gemini-2.5-flash`), and a **100% deterministic offline chemical-derivative rule engine (`RuleBasedOfflineAuditEngine`)**, BiteGuard AI ensures you never miss hidden allergens—even in grocery store dead zones without internet connectivity.
 
-> 📖 **Deep Dive**: For full architectural blueprints, trade-off analyses, and component diagrams, check out the [Technical Documentation](.artifacts/TECHNICAL_DOCUMENTATION.md).
+> 📖 **Deep Dive**: For full architectural blueprints, trade-off analyses, sequence diagrams, and execution walkthroughs, check out the [Technical Documentation](.artifacts/TECHNICAL_DOCUMENTATION.md).
 
 ---
 
 ## ✨ Key Features
 
 ### 1. 🤖 Personalized 2-Step Adaptive Onboarding
-- **Welcome Screen**: Adaptive Material 3 layout with a soft radial-modern animated background, interactive guardian robot Lottie animation (`robot.json`), and personalized user greeting that adapts seamlessly across Light Mode, Dark Mode, Ultra High-Contrast mode, and varying screen sizes.
-- **Pick Allergies & Dietary Goals**: One-tap configuration for the **FDA Major 9 Allergens** (Peanuts, Tree Nuts, Dairy/Milk, Gluten/Wheat, Soy, Eggs, Shellfish, Fish, Sesame) and **7 Lifestyle & Clinical Health Goals** (Low Sugar, Low Sodium, Vegan, Vegetarian, Halal, Keto, Low FODMAP), persisted reactively via Jetpack `DataStore<Preferences>`.
+- **Welcome Screen**: Adaptive Material 3 layout with a soft radial-modern animated background (`RadialModernAnimatedBackground` with draw-phase animation), interactive guardian robot Lottie animation (`robot.json`), multi-language selector (`System`, `English`, `Bahasa Indonesia`, `한국어`), and personalized user greeting across Light Mode, Dark Mode, Ultra High-Contrast mode, and varying screen sizes.
+- **Pick Allergies & Dietary Goals**: One-tap configuration for the **FDA Major 9 Allergens** (Peanuts, Tree Nuts, Dairy, Gluten, Shellfish, Soy, Eggs, Fish, Sesame) and **6 Lifestyle & Clinical Health Goals** (Low Sugar, Low Sodium, Halal, Vegan, Vegetarian, Keto-Friendly), persisted reactively via Jetpack `DataStore<Preferences>`.
 
 ### 2. 📷 Uncluttered Real-Time Edge OCR Viewfinder
-- **Live Bounding-Box Overlays**: Highlights detected text blocks on the package in real time and locks onto structural ingredient headers (`Ingredients:`, `Contains:`, `May contain:`, `Komposisi`).
-- **Thermal Throttling Protection**: Automatically scales frame analysis from `30 FPS` down to an eco `5 FPS` (`200ms` gate) when the camera is stationary for more than 5 seconds, closing every `ImageProxy` deterministically on background threads.
+- **Calm Live Viewfinder + Structural Keyword Lock**: Keeps Stage 1 uncluttered with a corner focus reticle (no flickering live boxes) while ML Kit v2 detects text blocks and locks onto structural ingredient headers (`Ingredients:`, `Contains:`, `May contain:`, `Komposisi`).
+- **Thermal Throttling & Memory-Safe Capture**: Automatically scales frame analysis from `30 FPS` down to eco `5 FPS` (`200ms` gate) when stationary for `> 5s`, throttles full-frame snapshot `Bitmap` decoding to avoid per-frame heap churn, and closes every `ImageProxy` deterministically in `finally`.
 
-### 3. ⚡ Dedicated Audit Result & Filtered Words Screen
+### 3. ⚡ 3-Stage Scanning Flow & Dedicated Audit Result Screen
 - **3-Stage Scanning Flow**:
-  1. `LIVE_CAMERA`: Real-time viewfinder with live bounding boxes and structural keyword matching.
-  2. `SELECT_BLOCKS`: Freeze-frame block selection allowing users to tap exactly which text segments to analyze before running inference.
-  3. `AUDIT_RESULT`: Dedicated result screen displaying safety badges, matched chemical derivatives, and click-to-zoom captured image inspection.
+  1. `LIVE_CAMERA`: Uncluttered viewfinder with focus reticle, status HUD pill, and background ML Kit paragraph clustering.
+  2. `SELECT_BLOCKS`: Freeze-frame interactive block picker where users tap highlighted bounding boxes on the frozen photo or toggle block cards before running inference.
+  3. `AUDIT_RESULT`: Dedicated result screen displaying multimodal safety banners, matched chemical derivatives, highlighted OCR text, and click-to-zoom captured image inspection.
 - **Live Typewriter Verdict Streaming**: Streams `SAFE`, `CAUTION`, or `DANGER` verdicts and plain-language summaries token-by-token as Gemini 3.8 Flash (with cascading fallbacks) evaluates the package.
-- **Separated Filtered Words & Flagged Ingredients Card**: Clearly isolates matched allergen derivatives (e.g., *Arachis Oil*, *Sodium Caseinate*, *Hydrolyzed Whey*, *Maltodextrin*, *Disodium Inosinate*) into high-contrast filter chips and expandable Material 3 Accordions (`BiteGuardAccordion`).
+- **Separated Filtered Words & Flagged Ingredients Card**: Isolates matched allergen derivatives (e.g., *Arachis Oil*, *Sodium Caseinate*, *Hydrolyzed Whey*, *Maltodextrin*, *Disodium Inosinate*) into high-contrast filter chips, numbered cluster pins, and expandable Material 3 Accordions (`BiteGuardAccordion`).
 
-### 4. 🛡️ 5-Second Timeout & Offline Robot Guardian Fallback
-- **Strict 5000ms First-Token SLA**: Enforces a hard 5-second Time-To-First-Token (`TTFT`) timeout on cloud streaming.
-- **On-Device Chemical Derivative Matcher**: If the device is offline, the API key is unconfigured, or the network times out, BiteGuard AI automatically falls back to `LocalFallbackAuditEngine` and presents a reassuring Material 3 `AlertDialog` featuring the animated Guardian Robot (`robot.json`) alongside the immediate local safety verdict.
+### 4. 🛡️ First-Token Timeout & Offline Robot Guardian Fallback
+- **Configurable First-Token Timeout**: Enforces a `15,000ms` production Time-To-First-Token (`TTFT`) timeout on cloud streaming (configurable per environment/test, e.g., `5,000ms` in unit tests).
+- **On-Device Chemical Derivative Matcher**: If the device is offline, the API key is unconfigured/invalid, or the network times out, BiteGuard AI automatically falls back to `OfflineAuditEngine` (`RuleBasedOfflineAuditEngine` with precompiled regex rules) and presents a reassuring Material 3 `AlertDialog` featuring the animated Guardian Robot (`robot.json`) alongside the immediate local safety verdict.
 
 ### 5. 🔒 Zero-Cloud Encrypted Audit Log & Accessibility
-- **SQLCipher 256-bit AES Encryption**: Scan history and downsampled in-memory `140px` WebP package thumbnails are encrypted at rest using hardware-backed Android Keystore keys—never written to unencrypted disk files.
+- **SQLCipher 256-bit AES Encryption**: Scan history and downsampled in-memory `480px` WebP package thumbnails (`thumbnail_blob`) are encrypted at rest inside `EncryptedAuditDatabase` using hardware-backed Android Keystore `AES/GCM/NoPadding` keys—never written to unencrypted disk files.
 - **WCAG 2.1 AA/AAA Multimodal Signage**: Every safety badge pairs high-contrast semantic color palettes with distinct iconography (`CheckCircle`, `WarningAmber`, `Dangerous`) and explicit text labels, plus an instant **Ultra High-Contrast Accessibility Mode** toggle in the top app bar.
 
 ---
 
-## 🏗️ Modular Architecture
+## 🏗️ Multi-Module Clean Architecture
 
-BiteGuard AI follows a clean, multi-module Unidirectional Data Flow (MVI / MVVM) architecture wired with **Koin** Dependency Injection and background coroutine dispatchers (`Dispatchers.Default` for CPU/OCR/parsing/bitmap work, `Dispatchers.IO` for DataStore/SQLCipher/network streaming):
+BiteGuard AI follows **Clean Architecture** with **Dependency Inversion** and Unidirectional Data Flow (MVI / MVVM), wired with **Koin** Dependency Injection across **7 Gradle modules**:
+
+- **Presentation (`:feature:scanner`, `:feature:profile`)** depends only on `:core:domain`, `:core:ui`, and `:core:model` — **never** on `:core:data` in production code.
+- **Domain (`:core:domain`)** and **Models (`:core:model`)** are **pure Kotlin JVM** modules with zero Android framework dependencies (`Bitmap` encoding happens in `:feature:scanner` before crossing into `:core:domain`).
+- **Data (`:core:data`)** depends *inward* on `:core:domain` and implements its repository interfaces (`DefaultAuditRepository`, `DataStoreProfileRepository`).
+- **Composition Root (`:app`)** wires all Koin modules together (`coreDomainModule`, `coreDataModule`, `featureProfileModule`, `featureScannerModule`, `appModule`).
 
 ```mermaid
 flowchart TD
-    subgraph App[":app (Application Shell & Onboarding)"]
-        MA["MainActivity & BiteGuardAppShell"]
+    subgraph App[":app (Composition Root & Shell)"]
+        APP["BiteGuardApplication (Koin Graph)"]
+        MA["MainActivity & MainViewModel"]
         OB["OnboardingScreens (Welcome + Pick Allergies)"]
     end
 
-    subgraph Features["Feature Modules"]
-        SC[":feature:scanner (CameraX, EdgeTextAnalyzer, ScannerScreen, DedicatedAuditResultScreen)"]
+    subgraph Features["Feature Layer (Android / Compose)"]
+        SC[":feature:scanner (CameraX, EdgeTextAnalyzer, LabelImageEncoder, ScannerViewModel, ScannerScreen)"]
         PR[":feature:profile (DietaryProfileScreen, ScanHistoryScreen, ProfileViewModel)"]
     end
 
-    subgraph Core["Core Modules"]
-        UI[":core:ui (Adaptive Theme, BiteGuardAccordion, OfflineModelLottieAlertDialog)"]
-        DA[":core:data (AuditRepository, GeminiStreamDataSource, LocalFallbackAuditEngine, SQLCipher, DataStore)"]
-        MO[":core:model (AuditVerdict, UserDietaryProfile, Allergen, HealthGoal, StreamState)"]
+    subgraph Data["Data Layer (Android Implementations)"]
+        DA[":core:data (DefaultAuditRepository, GeminiStreamDataSource, EncryptedAuditDatabase, DataStoreProfileRepository)"]
     end
+
+    subgraph Domain["Domain Layer (Pure Kotlin JVM)"]
+        DO[":core:domain (Repository Interfaces, OfflineAuditEngine, UseCases)"]
+    end
+
+    subgraph Core["Shared Core"]
+        UI[":core:ui (BiteGuardAITheme, BiteGuardComponents, Localization, RobotLottie)"]
+        MO[":core:model (Pure Kotlin Models & StreamState)"]
+    end
+
+    APP -.->|wires DI| DA
+    APP -.->|wires DI| DO
+    APP -.->|wires DI| SC
+    APP -.->|wires DI| PR
 
     MA --> OB
     MA --> SC
     MA --> PR
+    MA --> DO
     OB --> UI
-    OB --> DA
+
+    SC --> DO
     SC --> UI
-    SC --> DA
+    SC --> MO
+    PR --> DO
     PR --> UI
-    PR --> DA
-    UI --> MO
+    PR --> MO
+
+    DA -->|implements| DO
     DA --> MO
+    DO --> MO
+    UI --> MO
 ```
 
-| Module | Responsibility |
-| :--- | :--- |
-| `:app` | Application entry point, Koin graph initialization, 2-step adaptive onboarding flow, and top-level navigation scaffold. |
-| `:feature:scanner` | CameraX lifecycle binding, ML Kit v2 `EdgeTextAnalyzer` with 5s thermal throttling, uncluttered live viewfinder, and the separated `DedicatedAuditResultScreen`. |
-| `:feature:profile` | Allergen & health goal configuration with M3 Accordions, chemical derivative reference guide, and searchable/filterable encrypted scan history. |
-| `:core:ui` | Adaptive Light/Dark/High-Contrast Material 3 theme (`BiteGuardAITheme`), multimodal safety signage, `BiteGuardAccordion`, `RadialModernAnimatedBackground`, and Lottie components (`robot.json`). |
-| `:core:data` | `DefaultAuditRepository`, `GeminiStreamDataSource`, `DefensiveVerdictParser`, `LocalFallbackAuditEngine`, `DataStoreProfileRepository`, and `SqlCipherAuditLogDataSource`. |
-| `:core:model` | Pure Kotlin domain models (`UserDietaryProfile`, `Allergen`, `HealthGoal`, `AuditVerdict`, `FlaggedIngredient`, `StreamState`). |
+| Module | Type | Responsibility |
+| :--- | :--- | :--- |
+| `:app` | Android App | Application entry point, Koin composition root (`allBiteGuardModules`), `MainViewModel`, `MainActivity`, and 2-step adaptive onboarding flow. |
+| `:feature:scanner` | Android Lib | CameraX lifecycle binding, ML Kit v2 `EdgeTextAnalyzer` with 5s thermal throttling & throttled snapshots, `LabelImageEncoder`, `ScannerViewModel`, and 3-stage `ScannerScreen`. |
+| `:feature:profile` | Android Lib | Allergen & health goal configuration with M3 Accordions, chemical derivative guide, `ProfileViewModel`, and searchable/filterable encrypted scan history with bulk delete. |
+| `:core:domain` | **Pure Kotlin JVM** | Platform-agnostic repository interfaces (`AuditRepository`, `ProfileRepository`), `OfflineAuditEngine` / `RuleBasedOfflineAuditEngine`, and UseCases (`AuditLabelUseCase`, `EvaluateOfflineLabelUseCase`, `SubmitAuditFeedbackUseCase`, `ExtractHighlightTermsUseCase`, `FilterScanHistoryUseCase`). |
+| `:core:data` | Android Lib | `DefaultAuditRepository`, `GeminiStreamDataSource`, `DefensiveVerdictParser`, `DataStoreProfileRepository`, and `EncryptedAuditDatabase` (SQLCipher + Android Keystore). |
+| `:core:ui` | Android Lib | Adaptive Light/Dark/High-Contrast Material 3 theme (`BiteGuardAITheme`), multimodal safety signage, `BiteGuardAccordion`, `RadialModernAnimatedBackground`, `ZoomableImageDialog`, localization helpers, and Lottie components (`robot.json`). |
+| `:core:model` | **Pure Kotlin JVM** | Framework-free domain models (`UserDietaryProfile`, `Allergen`, `HealthGoal`, `AuditVerdict`, `FlaggedIngredient`, `TelemetryEvent`, `StreamState`). |
 
 ---
 
@@ -98,7 +123,7 @@ flowchart TD
 ### Prerequisites
 - **Android Studio** Ladybug / Meerkat or newer (AGP `9.5.2`, Kotlin `2.2.10`)
 - **JDK 11+**
-- **Android Device or Emulator** running API 30+ (Android 11+)
+- **Android Device or Emulator** running API 30+ (Android 11+, `targetSdk = 37`)
 - **Google AI Studio API Key** (optional — the app runs in 100% offline local-rule mode if omitted)
 
 ### 1. Configure Your Gemini API Key
@@ -117,15 +142,15 @@ GEMINI_API_KEY=AQ.YourGoogleAiStudioAuthenticationKeyHere
 # Assemble the debug APK
 ./gradlew :app:assembleDebug
 
-# Run all unit tests across :app, :core:data, :feature:scanner, and :feature:profile
-./gradlew testDebugUnitTest
+# Run all unit tests across Android and pure-JVM modules (:core:domain, :core:model, :core:data, :feature:scanner, :feature:profile, :app)
+./gradlew testDebugUnitTest :core:domain:test :core:model:test
 ```
 
 ---
 
 ## 🔍 Debugging & Logcat Diagnostics
 
-In `debug` builds, BiteGuard AI outputs structured diagnostic logs across the entire OCR and AI pipeline. Filter Logcat by **`BiteGuardAI`** to inspect:
+In `debug` builds (`BuildConfig.DEBUG`), BiteGuard AI outputs structured diagnostic logs across the entire OCR and AI pipeline. Filter Logcat by **`BiteGuardAI`** to inspect:
 
 - `BiteGuardAI_Gemini`: Model initialization (`gemini-3.8-flash`), automated fallback cascade transitions, masked API key validation, streaming token chunk counts, and network exception stacktraces.
 - `BiteGuardAI_AuditRepo`: First-token latency (`ttftMs`), timeout enforcement, defensive JSON/Markdown parsing, and automatic offline fallback resolution.

@@ -31,9 +31,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,12 +48,10 @@ import androidx.compose.ui.unit.dp
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import com.biteguard.core.data.profile.ProfileRepository
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.SafetyLevel
@@ -69,8 +68,6 @@ import com.biteguard.feature.scanner.ScannerViewModel
 import com.example.biteguardai.ui.onboarding.BiteGuardOnboardingFlow
 import com.example.biteguardai.ui.theme.BiteGuardAITheme
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
-import kotlinx.coroutines.launch
-import org.koin.android.ext.android.inject
 import org.koin.androidx.compose.koinViewModel
 
 enum class BiteGuardDestination(
@@ -97,35 +94,22 @@ enum class BiteGuardDestination(
 
 class MainActivity : ComponentActivity() {
 
-    private val profileRepository: ProfileRepository by inject()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val initialOnboardingState = androidx.compose.runtime.remember {
-                profileRepository.isOnboardingCompletedSync()
-            }
-            var sessionOnboardingCompleted by rememberSaveable {
-                mutableStateOf(initialOnboardingState)
-            }
-            val profile by profileRepository.userProfileFlow.collectAsStateWithLifecycle(
-                initialValue = UserDietaryProfile()
-            )
-            val onboardingAcceptedFromFlow by profileRepository.onboardingAcceptedFlow.collectAsStateWithLifecycle(
-                initialValue = initialOnboardingState
-            )
-            val isOnboarded = sessionOnboardingCompleted || onboardingAcceptedFromFlow || profile.userName.isNotBlank()
-            val scope = rememberCoroutineScope()
+            val mainViewModel: MainViewModel = koinViewModel()
+            val mainState by mainViewModel.uiState.collectAsStateWithLifecycle()
+            val profile = mainState.profile
 
             val baseConfig = LocalConfiguration.current
             val baseContext = LocalContext.current
             val activityResultRegistryOwner = LocalActivityResultRegistryOwner.current ?: this
             val onBackPressedDispatcherOwner = LocalOnBackPressedDispatcherOwner.current ?: this
-            val localizedConfig = androidx.compose.runtime.remember(baseConfig, profile.selectedLanguage) {
+            val localizedConfig = remember(baseConfig, profile.selectedLanguage) {
                 getLocalizedConfiguration(baseConfig, profile.selectedLanguage)
             }
-            val localizedContext = androidx.compose.runtime.remember(baseContext, profile.selectedLanguage) {
+            val localizedContext = remember(baseContext, profile.selectedLanguage) {
                 getLocalizedContext(baseContext, profile.selectedLanguage)
             }
 
@@ -140,26 +124,21 @@ class MainActivity : ComponentActivity() {
                 ) {
                     BiteGuardAppShell(
                         profile = profile,
-                        onboardingAccepted = isOnboarded,
+                        onboardingAccepted = mainState.isOnboarded,
                         onToggleHighContrast = {
-                            scope.launch {
-                                profileRepository.setHighContrastMode(!profile.highContrastMode)
-                            }
+                            mainViewModel.onIntent(MainIntent.ToggleHighContrast)
                         },
                         onSelectLanguage = { lang ->
-                            scope.launch {
-                                profileRepository.setLanguage(lang)
-                            }
+                            mainViewModel.onIntent(MainIntent.SelectLanguage(lang))
                         },
                         onCompleteOnboarding = { userName, allergens, goals ->
-                            sessionOnboardingCompleted = true
-                            scope.launch {
-                                profileRepository.completeOnboarding(
+                            mainViewModel.onIntent(
+                                MainIntent.CompleteOnboarding(
                                     userName = userName,
                                     allergens = allergens,
                                     healthGoals = goals
                                 )
-                            }
+                            )
                         }
                     )
                 }

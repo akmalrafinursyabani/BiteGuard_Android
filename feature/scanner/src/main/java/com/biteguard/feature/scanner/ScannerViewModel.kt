@@ -3,21 +3,25 @@ package com.biteguard.feature.scanner
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.biteguard.core.data.audit.AuditRepository
-import com.biteguard.core.data.profile.ProfileRepository
-import com.biteguard.core.model.AuditErrorKind
+import com.biteguard.core.domain.repository.ProfileRepository
+import com.biteguard.core.domain.usecase.AuditLabelUseCase
+import com.biteguard.core.domain.usecase.EvaluateOfflineLabelUseCase
+import com.biteguard.core.domain.usecase.ExtractHighlightTermsUseCase
+import com.biteguard.core.domain.usecase.SubmitAuditFeedbackUseCase
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.StreamState
 import com.biteguard.core.model.UserDietaryProfile
 import com.biteguard.core.model.UserFeedback
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SamplePackagePreset(
     val title: String,
@@ -52,7 +56,8 @@ data class ScannerUiState(
     val capturedBoxes: List<DetectedTextBox> = emptyList(),
     val selectedBlockIndices: Set<Int> = emptySet(),
     val capturedFrameWidth: Int = 1080,
-    val capturedFrameHeight: Int = 1920
+    val capturedFrameHeight: Int = 1920,
+    val highlightedTerms: List<String> = emptyList()
 ) {
     /**
      * NFR-NT1: Progressive scanner status text (never a static loading spinner).
@@ -93,8 +98,12 @@ sealed interface ScannerIntent {
 }
 
 class ScannerViewModel(
-    private val auditRepository: AuditRepository,
-    private val profileRepository: ProfileRepository
+    private val auditLabelUseCase: AuditLabelUseCase,
+    private val evaluateOfflineLabelUseCase: EvaluateOfflineLabelUseCase,
+    private val submitAuditFeedbackUseCase: SubmitAuditFeedbackUseCase,
+    private val extractHighlightTermsUseCase: ExtractHighlightTermsUseCase,
+    private val profileRepository: ProfileRepository,
+    private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     private val streamStateFlow = MutableStateFlow<StreamState<AuditVerdict>>(StreamState.Idle)
@@ -117,6 +126,18 @@ class ScannerViewModel(
         }
     ) { profile, stream, frame, (manualPair, retryCount, blockSel) ->
         val (showManual, manualText) = manualPair
+        val verdictForHighlights = when (stream) {
+            is StreamState.Success -> stream.data
+            is StreamState.Error -> stream.fallbackVerdict
+            else -> null
+        }
+        val highlightedTerms = if (verdictForHighlights != null) {
+            withContext(defaultDispatcher) {
+                extractHighlightTermsUseCase(verdictForHighlights, profile)
+            }
+        } else {
+            emptyList()
+        }
         ScannerUiState(
             profile = profile,
             streamState = stream,
@@ -135,7 +156,8 @@ class ScannerViewModel(
             capturedBoxes = blockSel.capturedBoxes,
             selectedBlockIndices = blockSel.selectedIndices,
             capturedFrameWidth = blockSel.imageWidth,
-            capturedFrameHeight = blockSel.imageHeight
+            capturedFrameHeight = blockSel.imageHeight,
+            highlightedTerms = highlightedTerms
         )
     }.stateIn(
         scope = viewModelScope,
@@ -282,11 +304,15 @@ class ScannerViewModel(
                     streamStateFlow.value = StreamState.Success(current.fallbackVerdict!!)
                 } else {
                     val text = lastCapturedText.ifBlank { liveFrameFlow.value?.fullText.orEmpty() }
+                    val bitmapSnapshot = lastCapturedBitmap
                     viewModelScope.launch {
-                        val offlineVerdict = auditRepository.evaluateOfflineOnly(
+                        val encoded = withContext(defaultDispatcher) {
+                            LabelImageEncoder.encode(bitmapSnapshot)
+                        }
+                        val offlineVerdict = evaluateOfflineLabelUseCase(
                             rawExtractedText = text,
                             profile = uiState.value.profile,
-                            frameBitmap = lastCapturedBitmap
+                            thumbnailBytes = encoded.thumbnailWebpBytes
                         )
                         streamStateFlow.value = StreamState.Success(offlineVerdict)
                     }
@@ -296,6 +322,8 @@ class ScannerViewModel(
             ScannerIntent.DismissAuditResult -> {
                 activeAuditJob?.cancel()
                 retryAttemptFlow.value = 0
+                lastCapturedBitmap = null
+                latestNonNullCameraBitmap = null
                 blockSelectionFlow.value = BlockSelectionSession(isActive = false)
                 streamStateFlow.value = StreamState.Idle
             }
@@ -312,7 +340,7 @@ class ScannerViewModel(
             }
 
             is ScannerIntent.SubmitFeedback -> viewModelScope.launch {
-                auditRepository.submitFeedback(intent.verdict, intent.feedback)
+                submitAuditFeedbackUseCase(intent.verdict, intent.feedback)
                 val current = streamStateFlow.value
                 if (current is StreamState.Success && current.data.id == intent.verdict.id) {
                     streamStateFlow.value = StreamState.Success(
@@ -333,33 +361,18 @@ class ScannerViewModel(
         retryAttemptFlow.value = attempt
         debugLog("startAuditStream | attempt=$attempt | textLen=${lastCapturedText.length} | hasBitmap=${bitmap != null}")
 
-        if (lastCapturedText.isBlank()) {
-            debugWarn("startAuditStream aborted: no text detected on label")
-            streamStateFlow.value = StreamState.Error(
-                throwable = IllegalArgumentException("No text detected on label"),
-                cachedRawText = "",
-                errorKind = AuditErrorKind.NO_TEXT_DETECTED,
-                fallbackVerdict = null,
-                retryAttempt = attempt
-            )
-            return
-        }
-
         activeAuditJob = viewModelScope.launch {
-            if (attempt > 0) {
-                val backoffMs = ((1L shl attempt.coerceAtMost(3)) * 350L).coerceAtMost(2_500L)
-                debugLog("Retrying Cloud AI attempt #$attempt after backoff=${backoffMs}ms")
-                streamStateFlow.value = StreamState.Streaming(
-                    partialVerdict = com.biteguard.core.model.PartialAuditVerdict(),
-                    stageMessage = "Retrying Cloud AI (attempt #$attempt)..."
-                )
-                delay(backoffMs)
+            val encodedImage = if (bitmap != null) {
+                withContext(defaultDispatcher) { LabelImageEncoder.encode(bitmap) }
+            } else {
+                EncodedLabelImage(null, null)
             }
 
-            auditRepository.performLabelAudit(
+            auditLabelUseCase(
                 rawExtractedText = lastCapturedText,
                 profile = uiState.value.profile,
-                frameBitmap = bitmap,
+                imageJpegBytes = encodedImage.aiJpegBytes,
+                thumbnailBytes = encodedImage.thumbnailWebpBytes,
                 retryAttempt = attempt
             ).collect { state ->
                 when (state) {
@@ -377,16 +390,22 @@ class ScannerViewModel(
         private const val TAG = "BiteGuardAI_ScannerVM"
 
         private fun debugLog(message: String) {
-            runCatching { android.util.Log.d(TAG, message) }
+            if (BuildConfig.DEBUG) {
+                runCatching { android.util.Log.d(TAG, message) }
+            }
         }
 
         private fun debugWarn(message: String) {
-            runCatching { android.util.Log.w(TAG, message) }
+            if (BuildConfig.DEBUG) {
+                runCatching { android.util.Log.w(TAG, message) }
+            }
         }
 
         private fun debugError(message: String, throwable: Throwable? = null) {
-            runCatching {
-                if (throwable != null) android.util.Log.e(TAG, message, throwable) else android.util.Log.e(TAG, message)
+            if (BuildConfig.DEBUG) {
+                runCatching {
+                    if (throwable != null) android.util.Log.e(TAG, message, throwable) else android.util.Log.e(TAG, message)
+                }
             }
         }
         val SAMPLE_PRESETS = listOf(

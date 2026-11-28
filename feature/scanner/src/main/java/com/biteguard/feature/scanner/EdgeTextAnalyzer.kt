@@ -56,6 +56,9 @@ class EdgeTextAnalyzer(
     private var lastAnalyzedTimestampMs: Long = 0L
 
     @Volatile
+    private var lastSnapshotTimestampMs: Long = 0L
+
+    @Volatile
     private var lastChangeTimestampMs: Long = System.currentTimeMillis()
 
     @Volatile
@@ -116,25 +119,34 @@ class EdgeTextAnalyzer(
                 val fullText = visionText.text.trim()
                 val isReady = boxes.any { it.containsIngredientKeyword } || containsStructuralKeyword(fullText)
 
-                // Decode bitmap on background thread (Dispatchers.Default) only when text is present
-                val snapshotBitmap = if (boxes.isNotEmpty()) {
-                    runCatching { imageProxy.toBitmap() }.getOrNull()
-                } else {
-                    null
-                }
-
                 // Check if text or bounding box centroids changed to manage 5-second thermal throttling
+                val currentTimeMs = System.currentTimeMillis()
                 val currentSignature = fullText.lowercase().take(180).hashCode()
                 val currentCentroid = boxes.sumOf { it.boundingBox.centerX() + it.boundingBox.centerY() }
+                val textChanged = currentSignature != lastTextSignature
                 val movedSignificantly = abs(currentCentroid - lastCentroidSum) > 45
 
-                if (currentSignature != lastTextSignature || movedSignificantly) {
+                if (textChanged || movedSignificantly) {
                     lastTextSignature = currentSignature
                     lastCentroidSum = currentCentroid
-                    lastChangeTimestampMs = System.currentTimeMillis()
+                    lastChangeTimestampMs = currentTimeMs
                     isThrottledMode = false
-                } else if (System.currentTimeMillis() - lastChangeTimestampMs >= 5_000L) {
+                } else if (currentTimeMs - lastChangeTimestampMs >= 5_000L) {
                     isThrottledMode = true
+                }
+
+                // Throttle full-frame Bitmap decoding to avoid 30 FPS heap churn while keeping a fresh capture snapshot
+                val shouldCaptureSnapshot = boxes.isNotEmpty() && (
+                    lastSnapshotTimestampMs == 0L ||
+                        (textChanged && currentTimeMs - lastSnapshotTimestampMs >= MIN_TEXT_CHANGE_SNAPSHOT_MS) ||
+                        currentTimeMs - lastSnapshotTimestampMs >= SNAPSHOT_CAPTURE_INTERVAL_MS
+                    )
+                val snapshotBitmap = if (shouldCaptureSnapshot) {
+                    runCatching { imageProxy.toBitmap() }.getOrNull()?.also {
+                        lastSnapshotTimestampMs = currentTimeMs
+                    }
+                } else {
+                    null
                 }
 
                 onResult(
@@ -168,6 +180,8 @@ class EdgeTextAnalyzer(
 
     companion object {
         private const val TAG = "BiteGuardAI_EdgeOCR"
+        private const val SNAPSHOT_CAPTURE_INTERVAL_MS = 1_000L
+        private const val MIN_TEXT_CHANGE_SNAPSHOT_MS = 350L
         private val STRUCTURAL_KEYWORDS = listOf(
             "ingredients:",
             "ingredients",
@@ -194,6 +208,20 @@ class EdgeTextAnalyzer(
             }
         }
 
+        private class ClusterAccumulator(firstBox: DetectedTextBox) {
+            val boxes: MutableList<DetectedTextBox> = mutableListOf(firstBox)
+            var bounds: Rect = firstBox.boundingBox
+            var hasKeyword: Boolean = firstBox.containsIngredientKeyword
+
+            fun add(box: DetectedTextBox) {
+                boxes.add(box)
+                bounds = unionRects(bounds, box.boundingBox)
+                if (box.containsIngredientKeyword) {
+                    hasKeyword = true
+                }
+            }
+        }
+
         /**
          * Clusters fragmented ML Kit text blocks into wider paragraph-level containers.
          * Reduces visual clutter on screen and enables 1-tap capture of entire ingredient sections.
@@ -217,18 +245,16 @@ class EdgeTextAnalyzer(
                         .thenBy { it.boundingBox.left }
                 )
 
-                val clusters = mutableListOf<MutableList<DetectedTextBox>>()
+                val clusters = mutableListOf<ClusterAccumulator>()
 
                 for (box in sorted) {
                     val bRect = box.boundingBox
                     val bHeight = bRect.bottom - bRect.top
                     val bCenterX = (bRect.left + bRect.right) / 2
 
-                    // Find a cluster this box can merge into
+                    // Find a cluster this box can merge into using cached cluster bounds
                     val matchingCluster = clusters.firstOrNull { cluster ->
-                        val clusterRect = cluster.fold(cluster.first().boundingBox) { acc, item ->
-                            unionRects(acc, item.boundingBox)
-                        }
+                        val clusterRect = cluster.bounds
                         val clusterHeight = clusterRect.bottom - clusterRect.top
                         val clusterCenterX = (clusterRect.left + clusterRect.right) / 2
 
@@ -241,7 +267,7 @@ class EdgeTextAnalyzer(
                         // Check vertical overlap or vertical gap
                         val verticalOverlap = maxOf(0, minOf(clusterRect.bottom, bRect.bottom) - maxOf(clusterRect.top, bRect.top))
                         val verticalGap = bRect.top - clusterRect.bottom
-                        val avgLineHeight = (bHeight + clusterHeight) / (cluster.size + 1)
+                        val avgLineHeight = (bHeight + clusterHeight) / (cluster.boxes.size + 1)
                         val maxAllowedGap = maxOf(48, (avgLineHeight * 1.6).toInt())
 
                         // Case 1: Same horizontal line (horizontal gap <= 40px and vertical overlap > 0)
@@ -251,7 +277,7 @@ class EdgeTextAnalyzer(
                         val isVerticallyStackedParagraph = hasHorizontalAffinity && verticalGap in -24..maxAllowedGap
 
                         // Case 3: Keyword anchor affinity (contains "Ingredients" or "Contains", pull adjacent text)
-                        val isKeywordAffinity = (cluster.any { it.containsIngredientKeyword } || box.containsIngredientKeyword) &&
+                        val isKeywordAffinity = (cluster.hasKeyword || box.containsIngredientKeyword) &&
                             hasHorizontalAffinity && verticalGap in -24..maxOf(72, avgLineHeight * 2)
 
                         isSameLineContinuation || isVerticallyStackedParagraph || isKeywordAffinity
@@ -260,28 +286,25 @@ class EdgeTextAnalyzer(
                     if (matchingCluster != null) {
                         matchingCluster.add(box)
                     } else {
-                        clusters.add(mutableListOf(box))
+                        clusters.add(ClusterAccumulator(box))
                     }
                 }
 
                 val clusteredBoxes = clusters.map { cluster ->
-                    if (cluster.size == 1) {
-                        cluster.first()
+                    if (cluster.boxes.size == 1) {
+                        cluster.boxes.first()
                     } else {
-                        val unionRect = cluster.fold(cluster.first().boundingBox) { acc, item ->
-                            unionRects(acc, item.boundingBox)
-                        }
                         // Sort items in top-to-bottom, left-to-right reading order
-                        val sortedItems = cluster.sortedWith(
+                        val sortedItems = cluster.boxes.sortedWith(
                             compareBy<DetectedTextBox> { it.boundingBox.top / 10 }
                                 .thenBy { it.boundingBox.left }
                         )
                         val mergedText = sortedItems.joinToString("\n") { it.text.trim() }
-                        val hasKeyword = cluster.any { it.containsIngredientKeyword } || containsStructuralKeyword(mergedText)
+                        val hasKeyword = cluster.hasKeyword || containsStructuralKeyword(mergedText)
 
                         DetectedTextBox(
                             text = mergedText,
-                            boundingBox = unionRect,
+                            boundingBox = cluster.bounds,
                             containsIngredientKeyword = hasKeyword
                         )
                     }

@@ -355,7 +355,7 @@ private fun WelcomeNameStep(
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "robotHalo")
-    val haloScale by infiniteTransition.animateFloat(
+    val haloScaleState = infiniteTransition.animateFloat(
         initialValue = 0.97f,
         targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
@@ -424,8 +424,9 @@ private fun WelcomeNameStep(
                 modifier = Modifier
                     .size(robotContainerSize)
                     .graphicsLayer {
-                        scaleX = haloScale
-                        scaleY = haloScale
+                        val scale = haloScaleState.value
+                        scaleX = scale
+                        scaleY = scale
                     }
             ) {
                 Surface(

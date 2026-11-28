@@ -7,7 +7,10 @@ import org.koin.dsl.module
 val featureScannerModule = module {
     viewModel {
         ScannerViewModel(
-            auditRepository = get(),
+            auditLabelUseCase = get(),
+            evaluateOfflineLabelUseCase = get(),
+            submitAuditFeedbackUseCase = get(),
+            extractHighlightTermsUseCase = get(),
             profileRepository = get()
         )
     }

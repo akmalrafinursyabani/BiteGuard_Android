@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.biteguard.core.domain.repository.ProfileRepository
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.UserDietaryProfile
@@ -25,25 +26,6 @@ import java.time.Instant
 private val Context.biteGuardDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "biteguard_user_profile_prefs"
 )
-
-interface ProfileRepository {
-    val userProfileFlow: Flow<UserDietaryProfile>
-    val onboardingAcceptedFlow: Flow<Boolean>
-
-    fun isOnboardingCompletedSync(): Boolean
-    suspend fun setUserName(name: String)
-    suspend fun toggleAllergen(allergen: Allergen)
-    suspend fun toggleHealthGoal(goal: HealthGoal)
-    suspend fun setHighContrastMode(enabled: Boolean)
-    suspend fun setLanguage(language: String)
-    suspend fun setOnboardingAccepted(accepted: Boolean)
-    suspend fun completeOnboarding(
-        userName: String,
-        allergens: Set<Allergen>,
-        healthGoals: Set<HealthGoal> = emptySet()
-    )
-    suspend fun updateProfile(profile: UserDietaryProfile)
-}
 
 class DataStoreProfileRepository(
     private val context: Context,

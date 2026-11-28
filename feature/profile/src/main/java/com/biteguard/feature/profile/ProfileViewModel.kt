@@ -2,8 +2,11 @@ package com.biteguard.feature.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.biteguard.core.data.audit.AuditRepository
-import com.biteguard.core.data.profile.ProfileRepository
+import com.biteguard.core.domain.repository.AuditRepository
+import com.biteguard.core.domain.repository.ProfileRepository
+import com.biteguard.core.domain.usecase.ExtractHighlightTermsUseCase
+import com.biteguard.core.domain.usecase.FilterScanHistoryUseCase
+import com.biteguard.core.domain.usecase.SubmitAuditFeedbackUseCase
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.HealthGoal
@@ -27,6 +30,7 @@ data class ProfileAndHistoryUiState(
     val searchQuery: String = "",
     val selectedSafetyFilter: SafetyLevel? = null,
     val selectedVerdictForDetail: AuditVerdict? = null,
+    val selectedVerdictHighlights: List<String> = emptyList(),
     val showClearConfirmation: Boolean = false,
     val selectedIdsForBulkDelete: Set<String> = emptySet(),
     val showBulkDeleteConfirmation: Boolean = false
@@ -67,6 +71,9 @@ private data class SelectionDialogState(
 class ProfileViewModel(
     private val profileRepository: ProfileRepository,
     private val auditRepository: AuditRepository,
+    private val filterScanHistoryUseCase: FilterScanHistoryUseCase,
+    private val submitAuditFeedbackUseCase: SubmitAuditFeedbackUseCase,
+    private val extractHighlightTermsUseCase: ExtractHighlightTermsUseCase,
     private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
@@ -97,19 +104,16 @@ class ProfileViewModel(
             history
         } else {
             withContext(defaultDispatcher) {
-                history.filter { verdict ->
-                    val matchesLevel = safetyFilter == null || verdict.safetyLevel == safetyFilter
-                    val matchesQuery = query.isBlank() ||
-                        verdict.productName.contains(query, ignoreCase = true) ||
-                        verdict.summary.contains(query, ignoreCase = true) ||
-                        verdict.rawExtractedText.contains(query, ignoreCase = true) ||
-                        verdict.flaggedIngredients.any {
-                            it.name.contains(query, ignoreCase = true) ||
-                                it.riskReason.contains(query, ignoreCase = true)
-                        }
-                    matchesLevel && matchesQuery
-                }
+                filterScanHistoryUseCase(history, query, safetyFilter)
             }
+        }
+        val selectedVerdict = history.firstOrNull { it.id == selState.selectedId }
+        val selectedHighlights = if (selectedVerdict != null) {
+            withContext(defaultDispatcher) {
+                extractHighlightTermsUseCase(selectedVerdict, profile)
+            }
+        } else {
+            emptyList()
         }
 
         ProfileAndHistoryUiState(
@@ -118,7 +122,8 @@ class ProfileViewModel(
             filteredHistory = filtered,
             searchQuery = query,
             selectedSafetyFilter = safetyFilter,
-            selectedVerdictForDetail = history.firstOrNull { it.id == selState.selectedId },
+            selectedVerdictForDetail = selectedVerdict,
+            selectedVerdictHighlights = selectedHighlights,
             showClearConfirmation = selState.showClear,
             selectedIdsForBulkDelete = selState.selectedIds,
             showBulkDeleteConfirmation = selState.showBulkDelete
@@ -156,7 +161,7 @@ class ProfileViewModel(
                 selectedVerdictIdFlow.value = intent.verdict?.id
             }
             is ProfileIntent.SubmitVerdictFeedback -> viewModelScope.launch {
-                auditRepository.submitFeedback(intent.verdict, intent.feedback)
+                submitAuditFeedbackUseCase(intent.verdict, intent.feedback)
             }
             is ProfileIntent.RequestClearHistory -> {
                 showClearConfirmFlow.value = intent.show

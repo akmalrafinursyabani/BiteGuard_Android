@@ -51,7 +51,40 @@ data class AuditVerdict(
     val ttftMs: Long = 0L,
     val totalStreamDurationMs: Long = 0L,
     val userFeedback: UserFeedback? = null
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is AuditVerdict) return false
+        return id == other.id &&
+            safetyLevel == other.safetyLevel &&
+            summary == other.summary &&
+            flaggedIngredients == other.flaggedIngredients &&
+            rawExtractedText == other.rawExtractedText &&
+            timestamp == other.timestamp &&
+            isOfflineFallback == other.isOfflineFallback &&
+            productName == other.productName &&
+            snapshotThumbnailBytes.contentEquals(other.snapshotThumbnailBytes) &&
+            ttftMs == other.ttftMs &&
+            totalStreamDurationMs == other.totalStreamDurationMs &&
+            userFeedback == other.userFeedback
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + safetyLevel.hashCode()
+        result = 31 * result + summary.hashCode()
+        result = 31 * result + flaggedIngredients.hashCode()
+        result = 31 * result + rawExtractedText.hashCode()
+        result = 31 * result + timestamp.hashCode()
+        result = 31 * result + isOfflineFallback.hashCode()
+        result = 31 * result + productName.hashCode()
+        result = 31 * result + (snapshotThumbnailBytes?.contentHashCode() ?: 0)
+        result = 31 * result + ttftMs.hashCode()
+        result = 31 * result + totalStreamDurationMs.hashCode()
+        result = 31 * result + (userFeedback?.hashCode() ?: 0)
+        return result
+    }
+}
 
 enum class SafetyLevel(val label: String, val shortActionTitle: String) {
     SAFE("SAFE", "Safe for Your Profile"),

@@ -957,7 +957,7 @@ fun RadialModernAnimatedBackground(
     )
 
     val infiniteTransition = rememberInfiniteTransition(label = "radialModernBg")
-    val orbitAngle by infiniteTransition.animateFloat(
+    val orbitAngleState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2f * Math.PI).toFloat(),
         animationSpec = infiniteRepeatable(
@@ -966,7 +966,7 @@ fun RadialModernAnimatedBackground(
         ),
         label = "orbitAngle"
     )
-    val pulseScale by infiniteTransition.animateFloat(
+    val pulseScaleState = infiniteTransition.animateFloat(
         initialValue = 0.90f,
         targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
@@ -982,6 +982,8 @@ fun RadialModernAnimatedBackground(
             .background(baseBackground)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val orbitAngle = orbitAngleState.value
+            val pulseScale = pulseScaleState.value
             val minDim = size.minDimension.coerceAtLeast(1f)
             val baseRadius = minDim * 0.65f * pulseScale
 

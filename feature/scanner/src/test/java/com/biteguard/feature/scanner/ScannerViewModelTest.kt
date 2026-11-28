@@ -1,12 +1,18 @@
 package com.biteguard.feature.scanner
 
-import android.graphics.Bitmap
 import android.graphics.Rect
 import app.cash.turbine.test
 import com.biteguard.core.data.ai.AiStreamDataSource
 import com.biteguard.core.data.audit.DefaultAuditRepository
 import com.biteguard.core.data.db.InMemoryAuditLogDataSource
 import com.biteguard.core.data.profile.InMemoryProfileRepository
+import com.biteguard.core.domain.engine.RuleBasedOfflineAuditEngine
+import com.biteguard.core.domain.repository.AuditRepository
+import com.biteguard.core.domain.repository.ProfileRepository
+import com.biteguard.core.domain.usecase.AuditLabelUseCase
+import com.biteguard.core.domain.usecase.EvaluateOfflineLabelUseCase
+import com.biteguard.core.domain.usecase.ExtractHighlightTermsUseCase
+import com.biteguard.core.domain.usecase.SubmitAuditFeedbackUseCase
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditErrorKind
 import com.biteguard.core.model.HealthGoal
@@ -49,6 +55,18 @@ class ScannerViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private fun createViewModel(
+        auditRepository: AuditRepository,
+        profileRepository: ProfileRepository = InMemoryProfileRepository()
+    ): ScannerViewModel = ScannerViewModel(
+        auditLabelUseCase = AuditLabelUseCase(auditRepository),
+        evaluateOfflineLabelUseCase = EvaluateOfflineLabelUseCase(auditRepository),
+        submitAuditFeedbackUseCase = SubmitAuditFeedbackUseCase(auditRepository),
+        extractHighlightTermsUseCase = ExtractHighlightTermsUseCase(RuleBasedOfflineAuditEngine()),
+        profileRepository = profileRepository,
+        defaultDispatcher = testDispatcher
+    )
+
     /**
      * Use Case 1 (FR-02 & NFR-NT1): Real-time Edge OCR frame analysis detects structural keyword
      * ("Ingredients:") and transitions to ScanningEdge with Ready-to-Scan progressive status.
@@ -60,10 +78,10 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {}
         }
-        val viewModel = ScannerViewModel(
+        val viewModel = createViewModel(
             auditRepository = DefaultAuditRepository(dummyAi, InMemoryAuditLogDataSource()),
             profileRepository = InMemoryProfileRepository()
         )
@@ -113,7 +131,7 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 emit("VERDICT: DANGER\n")
                 emit("SUMMARY: Product contains Arachis Oil (peanut) and Sodium Caseinate (dairy).\n")
@@ -133,7 +151,7 @@ class ScannerViewModelTest {
             )
         )
         val auditLog = InMemoryAuditLogDataSource()
-        val viewModel = ScannerViewModel(DefaultAuditRepository(streamingAi, auditLog), profileRepo)
+        val viewModel = createViewModel(DefaultAuditRepository(streamingAi, auditLog), profileRepo)
 
         viewModel.uiState.test {
             awaitItem() // Idle
@@ -169,7 +187,7 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 throw IllegalStateException("Network unreachable")
             }
@@ -178,7 +196,7 @@ class ScannerViewModelTest {
             UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
         val auditRepo = DefaultAuditRepository(offlineAi, InMemoryAuditLogDataSource())
-        val viewModel = ScannerViewModel(auditRepo, profileRepo)
+        val viewModel = createViewModel(auditRepo, profileRepo)
 
         viewModel.uiState.test {
             val initial = awaitItem()
@@ -220,10 +238,10 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {}
         }
-        val viewModel = ScannerViewModel(
+        val viewModel = createViewModel(
             auditRepository = DefaultAuditRepository(dummyAi, InMemoryAuditLogDataSource()),
             profileRepository = InMemoryProfileRepository()
         )
@@ -251,13 +269,13 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 emit("VERDICT: SAFE\nSUMMARY: Clean sparkling water with no allergens.\nFLAGS_JSON: []")
             }
         }
         val auditLog = InMemoryAuditLogDataSource()
-        val viewModel = ScannerViewModel(
+        val viewModel = createViewModel(
             auditRepository = DefaultAuditRepository(cleanAi, auditLog),
             profileRepository = InMemoryProfileRepository()
         )
@@ -304,13 +322,13 @@ class ScannerViewModelTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 auditedRawText = rawExtractedText
                 emit("VERDICT: SAFE\nSUMMARY: Selected blocks are safe.\nFLAGS_JSON: []")
             }
         }
-        val viewModel = ScannerViewModel(
+        val viewModel = createViewModel(
             auditRepository = DefaultAuditRepository(recordingAi, InMemoryAuditLogDataSource()),
             profileRepository = InMemoryProfileRepository()
         )

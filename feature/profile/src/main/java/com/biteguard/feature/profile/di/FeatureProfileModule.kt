@@ -8,7 +8,10 @@ val featureProfileModule = module {
     viewModel {
         ProfileViewModel(
             profileRepository = get(),
-            auditRepository = get()
+            auditRepository = get(),
+            filterScanHistoryUseCase = get(),
+            submitAuditFeedbackUseCase = get(),
+            extractHighlightTermsUseCase = get()
         )
     }
 }

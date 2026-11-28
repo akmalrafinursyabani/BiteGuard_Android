@@ -1,12 +1,16 @@
 package com.biteguard.feature.profile
 
-import android.graphics.Bitmap
 import app.cash.turbine.test
 import com.biteguard.core.data.ai.AiStreamDataSource
 import com.biteguard.core.data.audit.DefaultAuditRepository
 import com.biteguard.core.data.db.InMemoryAuditLogDataSource
-import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
 import com.biteguard.core.data.profile.InMemoryProfileRepository
+import com.biteguard.core.domain.engine.RuleBasedOfflineAuditEngine
+import com.biteguard.core.domain.repository.AuditRepository
+import com.biteguard.core.domain.repository.ProfileRepository
+import com.biteguard.core.domain.usecase.ExtractHighlightTermsUseCase
+import com.biteguard.core.domain.usecase.FilterScanHistoryUseCase
+import com.biteguard.core.domain.usecase.SubmitAuditFeedbackUseCase
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.HealthGoal
 import com.biteguard.core.model.SafetyLevel
@@ -30,6 +34,19 @@ import org.junit.Test
 class ProfileViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
+    private val offlineEngine = RuleBasedOfflineAuditEngine()
+
+    private fun createViewModel(
+        profileRepository: ProfileRepository,
+        auditRepository: AuditRepository
+    ): ProfileViewModel = ProfileViewModel(
+        profileRepository = profileRepository,
+        auditRepository = auditRepository,
+        filterScanHistoryUseCase = FilterScanHistoryUseCase(),
+        submitAuditFeedbackUseCase = SubmitAuditFeedbackUseCase(auditRepository),
+        extractHighlightTermsUseCase = ExtractHighlightTermsUseCase(offlineEngine),
+        defaultDispatcher = testDispatcher
+    )
 
     @Before
     fun setUp() {
@@ -51,13 +68,13 @@ class ProfileViewModelTest {
                 override fun streamLabelAudit(
                     rawExtractedText: String,
                     profile: UserDietaryProfile,
-                    frameBitmap: Bitmap?
+                    imageJpegBytes: ByteArray?
                 ): Flow<String> = emptyFlow()
             },
             auditLogDataSource = auditLog
         )
 
-        val viewModel = ProfileViewModel(profileRepo, auditRepo)
+        val viewModel = createViewModel(profileRepo, auditRepo)
 
         viewModel.uiState.test {
             val initial = awaitItem()
@@ -84,11 +101,11 @@ class ProfileViewModelTest {
 
     @Test
     fun `filtering scan history by safety level and search query works reactively`() = runTest {
-        val dangerVerdict = LocalFallbackAuditEngine.evaluateOffline(
+        val dangerVerdict = offlineEngine.evaluateOffline(
             rawText = "Granola Bar\nIngredients: Oats, Arachis Oil, Whey.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
-        val safeVerdict = LocalFallbackAuditEngine.evaluateOffline(
+        val safeVerdict = offlineEngine.evaluateOffline(
             rawText = "Sparkling Water\nIngredients: Carbonated Water, Lemon Extract.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
@@ -101,13 +118,13 @@ class ProfileViewModelTest {
                 override fun streamLabelAudit(
                     rawExtractedText: String,
                     profile: UserDietaryProfile,
-                    frameBitmap: Bitmap?
+                    imageJpegBytes: ByteArray?
                 ): Flow<String> = emptyFlow()
             },
             auditLogDataSource = auditLog
         )
 
-        val viewModel = ProfileViewModel(profileRepo, auditRepo, testDispatcher)
+        val viewModel = createViewModel(profileRepo, auditRepo)
 
         viewModel.uiState.test {
             val all = awaitItem()
@@ -132,15 +149,15 @@ class ProfileViewModelTest {
 
     @Test
     fun `multi-select and bulk delete removes only selected scan items`() = runTest {
-        val verdict1 = LocalFallbackAuditEngine.evaluateOffline(
+        val verdict1 = offlineEngine.evaluateOffline(
             rawText = "Granola Bar\nIngredients: Oats, Arachis Oil, Whey.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
-        val verdict2 = LocalFallbackAuditEngine.evaluateOffline(
+        val verdict2 = offlineEngine.evaluateOffline(
             rawText = "Sparkling Water\nIngredients: Carbonated Water, Lemon Extract.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
-        val verdict3 = LocalFallbackAuditEngine.evaluateOffline(
+        val verdict3 = offlineEngine.evaluateOffline(
             rawText = "Cookies\nIngredients: Flour, Sugar, Butter.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )
@@ -153,13 +170,13 @@ class ProfileViewModelTest {
                 override fun streamLabelAudit(
                     rawExtractedText: String,
                     profile: UserDietaryProfile,
-                    frameBitmap: Bitmap?
+                    imageJpegBytes: ByteArray?
                 ): Flow<String> = emptyFlow()
             },
             auditLogDataSource = auditLog
         )
 
-        val viewModel = ProfileViewModel(profileRepo, auditRepo, testDispatcher)
+        val viewModel = createViewModel(profileRepo, auditRepo)
 
         viewModel.uiState.test {
             val initial = awaitItem()

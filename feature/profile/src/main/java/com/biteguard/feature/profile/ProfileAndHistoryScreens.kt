@@ -85,7 +85,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.HealthGoal
@@ -651,6 +650,9 @@ fun ScanHistoryScreen(
         )
 
         // Single-Line Horizontally Scrollable Filter Chips (Preserves ~75% screen height for scroll area)
+        val safetyCounts = remember(state.allHistory) {
+            state.allHistory.groupingBy { it.safetyLevel }.eachCount()
+        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -675,7 +677,7 @@ fun ScanHistoryScreen(
             SafetyLevel.entries.forEach { level ->
                 val isSelected = state.selectedSafetyFilter == level
                 val family = semanticColors.forSafetyLevel(level)
-                val count = state.allHistory.count { it.safetyLevel == level }
+                val count = safetyCounts[level] ?: 0
                 FilterChip(
                     selected = isSelected,
                     onClick = { onIntent(ProfileIntent.FilterBySafetyLevel(level)) },
@@ -876,15 +878,6 @@ fun ScanHistoryScreen(
                     }
                 }
                 item {
-                    val highlights by produceState(
-                        initialValue = emptyList(),
-                        key1 = selectedVerdict,
-                        key2 = state.profile
-                    ) {
-                        value = withContext(Dispatchers.Default) {
-                            LocalFallbackAuditEngine.extractHighlightTerms(selectedVerdict, state.profile)
-                        }
-                    }
                     BiteGuardAccordion(
                         title = "Scanned Package Text",
                         subtitle = "Raw text detected from package",
@@ -894,7 +887,7 @@ fun ScanHistoryScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             HighlightedRawTextCard(
                                 rawText = selectedVerdict.rawExtractedText,
-                                highlightedKeywords = highlights
+                                highlightedKeywords = state.selectedVerdictHighlights
                             )
                             MedicalDisclaimerBanner()
                         }

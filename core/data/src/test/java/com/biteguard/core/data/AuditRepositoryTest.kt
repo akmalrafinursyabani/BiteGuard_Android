@@ -1,12 +1,11 @@
 package com.biteguard.core.data
 
-import android.graphics.Bitmap
 import app.cash.turbine.test
 import com.biteguard.core.data.ai.AiStreamDataSource
 import com.biteguard.core.data.ai.DefensiveVerdictParser
 import com.biteguard.core.data.audit.DefaultAuditRepository
 import com.biteguard.core.data.db.InMemoryAuditLogDataSource
-import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
+import com.biteguard.core.domain.engine.RuleBasedOfflineAuditEngine
 import com.biteguard.core.model.Allergen
 import com.biteguard.core.model.AuditErrorKind
 import com.biteguard.core.model.HealthGoal
@@ -34,7 +33,7 @@ class AuditRepositoryTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 emit("VERDICT: DANGER\n")
                 emit("SUMMARY: Contains arachis oil (peanut derivative) and whey protein.\n")
@@ -88,7 +87,7 @@ class AuditRepositoryTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {
                 delay(6_500L)
                 emit("VERDICT: SAFE")
@@ -148,13 +147,13 @@ class AuditRepositoryTest {
             override fun streamLabelAudit(
                 rawExtractedText: String,
                 profile: UserDietaryProfile,
-                frameBitmap: Bitmap?
+                imageJpegBytes: ByteArray?
             ): Flow<String> = flow {}
         }
         val auditLog = InMemoryAuditLogDataSource()
         val repository = DefaultAuditRepository(fakeAi, auditLog)
 
-        val verdict = LocalFallbackAuditEngine.evaluateOffline(
+        val verdict = RuleBasedOfflineAuditEngine().evaluateOffline(
             rawText = "Ingredients: Filtered water, organic lemon extract.",
             profile = UserDietaryProfile(selectedAllergens = setOf(Allergen.PEANUTS))
         )

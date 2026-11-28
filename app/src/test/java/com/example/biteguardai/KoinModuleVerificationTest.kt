@@ -1,13 +1,13 @@
 package com.example.biteguardai
 
-import android.content.Context
 import com.biteguard.core.data.ai.AiStreamDataSource
-import com.biteguard.core.data.audit.AuditRepository
 import com.biteguard.core.data.audit.DefaultAuditRepository
 import com.biteguard.core.data.db.AuditLogDataSource
 import com.biteguard.core.data.db.InMemoryAuditLogDataSource
 import com.biteguard.core.data.profile.InMemoryProfileRepository
-import com.biteguard.core.data.profile.ProfileRepository
+import com.biteguard.core.domain.di.coreDomainModule
+import com.biteguard.core.domain.repository.AuditRepository
+import com.biteguard.core.domain.repository.ProfileRepository
 import com.biteguard.feature.profile.ProfileViewModel
 import com.biteguard.feature.profile.di.featureProfileModule
 import com.biteguard.feature.scanner.ScannerViewModel
@@ -36,23 +36,32 @@ class KoinModuleVerificationTest {
                     override fun streamLabelAudit(
                         rawExtractedText: String,
                         profile: com.biteguard.core.model.UserDietaryProfile,
-                        frameBitmap: android.graphics.Bitmap?
+                        imageJpegBytes: ByteArray?
                     ) = emptyFlow<String>()
                 }
             }
-            single<AuditRepository> { DefaultAuditRepository(get(), get()) }
+            single<AuditRepository> {
+                DefaultAuditRepository(
+                    aiStreamDataSource = get(),
+                    auditLogDataSource = get(),
+                    offlineAuditEngine = get()
+                )
+            }
         }
 
         val app = startKoin {
             modules(
                 listOf(
+                    coreDomainModule,
                     testDataModule,
                     featureProfileModule,
-                    featureScannerModule
+                    featureScannerModule,
+                    appModule
                 )
             )
         }
         try {
+            assertNotNull(app.koin.get<MainViewModel>())
             assertNotNull(app.koin.get<ProfileViewModel>())
             assertNotNull(app.koin.get<ScannerViewModel>())
             app.checkModules()

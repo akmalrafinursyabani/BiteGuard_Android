@@ -25,6 +25,7 @@ dependencyResolutionManagement {
 rootProject.name = "BiteGuard AI"
 include(":app")
 include(":core:model")
+include(":core:domain")
 include(":core:ui")
 include(":core:data")
 include(":feature:scanner")

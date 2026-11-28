@@ -1,13 +1,14 @@
 package com.biteguard.core.data.audit
 
-import android.graphics.Bitmap
 import android.util.Log
 import com.biteguard.core.data.BuildConfig
 import com.biteguard.core.data.ai.AiStreamDataSource
 import com.biteguard.core.data.ai.DefensiveVerdictParser
 import com.biteguard.core.data.ai.MissingApiKeyException
 import com.biteguard.core.data.db.AuditLogDataSource
-import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
+import com.biteguard.core.domain.engine.OfflineAuditEngine
+import com.biteguard.core.domain.engine.RuleBasedOfflineAuditEngine
+import com.biteguard.core.domain.repository.AuditRepository
 import com.biteguard.core.model.AuditErrorKind
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.PartialAuditVerdict
@@ -28,40 +29,18 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.util.UUID
 
 /**
- * FR-03, FR-04, FR-05, FR-06: Orchestrates Multimodal AI Label Audit,
- * 5000ms First-Token Timeout enforcement, Offline Rule-Based Fallback,
- * Encrypted History Persistence, and Telemetry Queuing.
+ * FR-03, FR-04, FR-05, FR-06: Data-layer implementation of [AuditRepository].
+ * Coordinates multimodal cloud streaming, first-token timeout fallback via [OfflineAuditEngine],
+ * encrypted history persistence, and telemetry queuing.
  */
-interface AuditRepository {
-    val scanHistoryFlow: Flow<List<AuditVerdict>>
-    val telemetryEventsFlow: Flow<List<TelemetryEvent>>
-
-    fun performLabelAudit(
-        rawExtractedText: String,
-        profile: UserDietaryProfile,
-        frameBitmap: Bitmap? = null,
-        retryAttempt: Int = 0
-    ): Flow<StreamState<AuditVerdict>>
-
-    suspend fun evaluateOfflineOnly(
-        rawExtractedText: String,
-        profile: UserDietaryProfile,
-        frameBitmap: Bitmap? = null
-    ): AuditVerdict
-
-    suspend fun submitFeedback(verdict: AuditVerdict, feedback: UserFeedback)
-    suspend fun clearScanHistory()
-    suspend fun deleteVerdicts(ids: List<String>)
-}
-
 class DefaultAuditRepository(
     private val aiStreamDataSource: AiStreamDataSource,
     private val auditLogDataSource: AuditLogDataSource,
+    private val offlineAuditEngine: OfflineAuditEngine = RuleBasedOfflineAuditEngine(),
     private val firstTokenTimeoutMs: Long = 15_000L,
     private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : AuditRepository {
@@ -72,15 +51,12 @@ class DefaultAuditRepository(
     override fun performLabelAudit(
         rawExtractedText: String,
         profile: UserDietaryProfile,
-        frameBitmap: Bitmap?,
+        imageJpegBytes: ByteArray?,
+        thumbnailBytes: ByteArray?,
         retryAttempt: Int
     ): Flow<StreamState<AuditVerdict>> = channelFlow {
         val cleanText = rawExtractedText.trim()
-        debugLog("performLabelAudit started | retryAttempt=$retryAttempt | textLen=${cleanText.length} | allergens=${profile.selectedAllergens.size} | goals=${profile.healthGoals.size} | hasBitmap=${frameBitmap != null}")
-
-        val thumbnailBytes = frameBitmap?.let {
-            withContext(defaultDispatcher) { compressThumbnailInMemory(it) }
-        }
+        debugLog("performLabelAudit started | retryAttempt=$retryAttempt | textLen=${cleanText.length} | allergens=${profile.selectedAllergens.size} | goals=${profile.healthGoals.size} | hasImage=${imageJpegBytes != null}")
 
         if (cleanText.isBlank()) {
             debugWarn("performLabelAudit aborted: cleanText is blank (NO_TEXT_DETECTED)")
@@ -116,7 +92,7 @@ class DefaultAuditRepository(
                 val tokenChannel = Channel<String>(Channel.UNLIMITED)
                 val producerJob = launch {
                     try {
-                        aiStreamDataSource.streamLabelAudit(cleanText, profile, frameBitmap)
+                        aiStreamDataSource.streamLabelAudit(cleanText, profile, imageJpegBytes)
                             .collect { token ->
                                 tokenChannel.send(token)
                             }
@@ -127,7 +103,7 @@ class DefaultAuditRepository(
                     }
                 }
 
-                // FR-04: Enforce strict 5000ms first-token timeout
+                // FR-04: Enforce first-token timeout before falling back to local engine
                 val firstResult = try {
                     withTimeout(firstTokenTimeoutMs) {
                         tokenChannel.receiveCatching()
@@ -186,7 +162,7 @@ class DefaultAuditRepository(
             val (parsed, localFallback) = withContext(defaultDispatcher) {
                 val parsedOutput = DefensiveVerdictParser.parseFinal(accumulatedRaw.toString())
                 // Cross-verify with local rule engine so critical life-threatening allergens are never missed
-                val localEval = LocalFallbackAuditEngine.evaluateOffline(
+                val localEval = offlineAuditEngine.evaluateOffline(
                     rawText = cleanText,
                     profile = profile,
                     snapshotThumbnailBytes = thumbnailBytes,
@@ -221,7 +197,7 @@ class DefaultAuditRepository(
                 rawExtractedText = cleanText,
                 timestamp = Instant.now(),
                 isOfflineFallback = false,
-                productName = LocalFallbackAuditEngine.inferProductName(cleanText),
+                productName = offlineAuditEngine.inferProductName(cleanText),
                 snapshotThumbnailBytes = thumbnailBytes,
                 ttftMs = firstTokenTimeMs,
                 totalStreamDurationMs = totalDurationMs
@@ -299,7 +275,7 @@ class DefaultAuditRepository(
     ) {
         val elapsed = (System.currentTimeMillis() - startTimeMs).coerceAtLeast(1L)
         val fallbackVerdict = withContext(defaultDispatcher) {
-            LocalFallbackAuditEngine.evaluateOffline(
+            offlineAuditEngine.evaluateOffline(
                 rawText = cleanText,
                 profile = profile,
                 snapshotThumbnailBytes = thumbnailBytes,
@@ -322,12 +298,11 @@ class DefaultAuditRepository(
     override suspend fun evaluateOfflineOnly(
         rawExtractedText: String,
         profile: UserDietaryProfile,
-        frameBitmap: Bitmap?
+        thumbnailBytes: ByteArray?
     ): AuditVerdict {
         debugLog("evaluateOfflineOnly invoked (textLen=${rawExtractedText.length})")
         val verdict = withContext(defaultDispatcher) {
-            val thumbnailBytes = frameBitmap?.let { compressThumbnailInMemory(it) }
-            LocalFallbackAuditEngine.evaluateOffline(
+            offlineAuditEngine.evaluateOffline(
                 rawText = rawExtractedText,
                 profile = profile,
                 snapshotThumbnailBytes = thumbnailBytes
@@ -359,22 +334,6 @@ class DefaultAuditRepository(
     override suspend fun deleteVerdicts(ids: List<String>) {
         auditLogDataSource.deleteVerdicts(ids)
     }
-
-    /**
-     * NFR-NT3 & FR-05: Downsamples captured frame in-memory to a crisp 480px WebP snapshot
-     * for click-to-zoom inspection, stored exclusively inside the encrypted DB — never written to unencrypted disk files.
-     */
-    private fun compressThumbnailInMemory(bitmap: Bitmap): ByteArray? = runCatching {
-        val targetSize = 480
-        val ratio = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
-        val width = if (ratio >= 1f) targetSize else (targetSize * ratio).toInt().coerceAtLeast(1)
-        val height = if (ratio >= 1f) (targetSize / ratio).toInt().coerceAtLeast(1) else targetSize
-        val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
-        ByteArrayOutputStream().use { bos ->
-            scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 78, bos)
-            bos.toByteArray()
-        }
-    }.getOrNull()
 
     companion object {
         private const val TAG = "BiteGuardAI_AuditRepo"

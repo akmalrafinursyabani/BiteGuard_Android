@@ -82,8 +82,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,7 +112,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.biteguard.core.data.fallback.LocalFallbackAuditEngine
 import com.biteguard.core.model.AuditErrorKind
 import com.biteguard.core.model.AuditVerdict
 import com.biteguard.core.model.StreamState
@@ -127,9 +126,7 @@ import com.biteguard.core.ui.components.OfflineModelLottieAlertDialog
 import com.biteguard.core.ui.components.SafetyVerdictBanner
 import com.biteguard.core.ui.components.VerdictFeedbackRow
 import com.example.biteguardai.ui.theme.LocalBiteGuardSemanticColors
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import kotlin.math.max
 
@@ -198,7 +195,7 @@ fun ScannerScreen(
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (hasCameraPermission) {
                         CameraXEdgePreviewWithOverlays(
-                            state = state,
+                            isReadyToScan = state.isReadyToScan,
                             onFrameAnalyzed = { onIntent(ScannerIntent.OnEdgeFrameAnalyzed(it)) },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -387,24 +384,26 @@ fun ScannerScreen(
 
 @Composable
 private fun CameraXEdgePreviewWithOverlays(
-    state: ScannerUiState,
+    isReadyToScan: Boolean,
     onFrameAnalyzed: (EdgeOcrFrameResult) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val semanticColors = LocalBiteGuardSemanticColors.current
+    val latestOnFrameAnalyzed by rememberUpdatedState(onFrameAnalyzed)
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
+            // TextureView mode ensures smooth slide/fade transitions inside AnimatedContent
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
     }
 
     val analyzer = remember {
-        EdgeTextAnalyzer(onResult = onFrameAnalyzed)
+        EdgeTextAnalyzer(onResult = { result -> latestOnFrameAnalyzed(result) })
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -448,7 +447,7 @@ private fun CameraXEdgePreviewWithOverlays(
         )
 
         val safeColor = semanticColors.safe.color
-        val guideColor = if (state.isReadyToScan) safeColor else Color.White.copy(alpha = 0.72f)
+        val guideColor = if (isReadyToScan) safeColor else Color.White.copy(alpha = 0.72f)
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             // Calm corner focus reticle in the middle of the live viewfinder (no flickering live boxes)
@@ -709,7 +708,10 @@ private fun InteractiveBlockSelectionScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 8.dp)
         ) {
-            itemsIndexed(state.capturedBoxes) { index, box ->
+            itemsIndexed(
+                items = state.capturedBoxes,
+                key = { index, box -> "$index-${box.boundingBox.left}-${box.boundingBox.top}" }
+            ) { index, box ->
                 val isSelected = index in state.selectedBlockIndices
                 val borderColor = when {
                     isSelected -> semanticColors.safe.color
@@ -1065,12 +1067,10 @@ private fun DedicatedAuditResultScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Result Screen Top Header Bar
-        Column (
+        Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.Start
-//            verticalAlignment = Alignment.CenterVertically,
-//            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             OutlinedButton(
                 onClick = { onIntent(ScannerIntent.DismissAuditResult) },
@@ -1116,7 +1116,7 @@ private fun DedicatedAuditResultScreen(
                 is StreamState.Success -> {
                     CompletedVerdictSheetCard(
                         verdict = currentStream.data,
-                        profile = state.profile,
+                        filteredKeywords = state.highlightedTerms,
                         capturedBoxes = state.capturedBoxes,
                         imageWidth = state.capturedFrameWidth,
                         imageHeight = state.capturedFrameHeight,
@@ -1128,7 +1128,7 @@ private fun DedicatedAuditResultScreen(
                 is StreamState.Error -> {
                     ErrorAndFallbackResultCard(
                         errorState = currentStream,
-                        profile = state.profile,
+                        highlights = state.highlightedTerms,
                         onRetryCloud = { onIntent(ScannerIntent.RetryFailedAuditWithBackoff) },
                         onKeepOfflineMatch = { onIntent(ScannerIntent.AcceptOfflineFallbackVerdict) },
                         onManualEdit = {
@@ -1252,7 +1252,7 @@ private fun StreamingTypewriterCard(
 @Composable
 private fun CompletedVerdictSheetCard(
     verdict: AuditVerdict,
-    profile: com.biteguard.core.model.UserDietaryProfile,
+    filteredKeywords: List<String>,
     capturedBoxes: List<DetectedTextBox> = emptyList(),
     imageWidth: Int = 1080,
     imageHeight: Int = 1920,
@@ -1272,18 +1272,8 @@ private fun CompletedVerdictSheetCard(
         }
     }
 
-    val filteredKeywords by produceState(
-        initialValue = emptyList(),
-        key1 = verdict,
-        key2 = profile
-    ) {
-        value = withContext(Dispatchers.Default) {
-            LocalFallbackAuditEngine.extractHighlightTerms(verdict, profile)
-        }
-    }
-
     // Correlate flagged ingredients with OCR cluster bounding boxes for numbered pins
-    val highlightBoxes = remember(verdict.flaggedIngredients, capturedBoxes) {
+    val highlightBoxes = remember(verdict.flaggedIngredients, capturedBoxes, semanticColors) {
         if (capturedBoxes.isEmpty()) return@remember emptyList()
         verdict.flaggedIngredients.mapIndexedNotNull { index, flag ->
             val matchingBox = capturedBoxes.firstOrNull { box ->
@@ -1295,9 +1285,9 @@ private fun CompletedVerdictSheetCard(
 
             if (matchingBox != null) {
                 val boxColor = when (flag.severity) {
-                    com.biteguard.core.model.Severity.HIGH -> Color(0xFFBA1A1A)
-                    com.biteguard.core.model.Severity.MEDIUM -> Color(0xFFC97A00)
-                    com.biteguard.core.model.Severity.LOW -> Color(0xFF006874)
+                    com.biteguard.core.model.Severity.HIGH -> semanticColors.danger.color
+                    com.biteguard.core.model.Severity.MEDIUM -> semanticColors.caution.color
+                    com.biteguard.core.model.Severity.LOW -> semanticColors.info.color
                 }
                 ImageHighlightBox(
                     index = index + 1,
@@ -1542,7 +1532,7 @@ private fun CompletedVerdictSheetCard(
 @Composable
 private fun ErrorAndFallbackResultCard(
     errorState: StreamState.Error,
-    profile: com.biteguard.core.model.UserDietaryProfile,
+    highlights: List<String>,
     onRetryCloud: () -> Unit,
     onKeepOfflineMatch: () -> Unit,
     onManualEdit: () -> Unit,
@@ -1551,19 +1541,6 @@ private fun ErrorAndFallbackResultCard(
 ) {
     val semanticColors = LocalBiteGuardSemanticColors.current
     val fallback = errorState.fallbackVerdict
-    val highlights by produceState(
-        initialValue = emptyList(),
-        key1 = fallback,
-        key2 = profile
-    ) {
-        value = if (fallback != null) {
-            withContext(Dispatchers.Default) {
-                LocalFallbackAuditEngine.extractHighlightTerms(fallback, profile)
-            }
-        } else {
-            emptyList()
-        }
-    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),

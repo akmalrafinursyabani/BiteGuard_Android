@@ -1,7 +1,5 @@
 package com.biteguard.core.data.ai
 
-import android.graphics.Bitmap
-import android.util.Base64
 import android.util.Log
 import com.biteguard.core.data.BuildConfig
 import com.biteguard.core.model.FlaggedIngredient
@@ -24,11 +22,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 /**
  * Abstraction over Gemini multimodal streaming API (FR-03) so repositories can be unit-tested
@@ -39,7 +37,7 @@ interface AiStreamDataSource {
     fun streamLabelAudit(
         rawExtractedText: String,
         profile: UserDietaryProfile,
-        frameBitmap: Bitmap?
+        imageJpegBytes: ByteArray? = null
     ): Flow<String>
 }
 
@@ -70,11 +68,11 @@ class GeminiStreamDataSource(
     override fun streamLabelAudit(
         rawExtractedText: String,
         profile: UserDietaryProfile,
-        frameBitmap: Bitmap?
+        imageJpegBytes: ByteArray?
     ): Flow<String> = flow {
         val key = apiKeyProvider().trim()
         val maskedPrefix = if (key.length >= 6) "${key.take(6)}..." else "(empty)"
-        debugLog("Starting streamLabelAudit | model=$modelName | keyPrefix=$maskedPrefix (len=${key.length}) | textLen=${rawExtractedText.length} | hasBitmap=${frameBitmap != null}")
+        debugLog("Starting streamLabelAudit | model=$modelName | keyPrefix=$maskedPrefix (len=${key.length}) | textLen=${rawExtractedText.length} | hasImage=${imageJpegBytes != null}")
 
         if (key.isBlank()) {
             debugError("GEMINI_API_KEY is blank in BuildConfig / local.properties!")
@@ -82,7 +80,7 @@ class GeminiStreamDataSource(
         }
 
         val prompt = buildAuditPrompt(rawExtractedText, profile)
-        val requestBodyJson = buildRequestJson(prompt, frameBitmap)
+        val requestBodyJson = buildRequestJson(prompt, imageJpegBytes)
 
         val candidateModels = listOf(modelName) + FALLBACK_MODEL_NAMES.filter { it != modelName }
         var lastException: Throwable? = null
@@ -167,23 +165,21 @@ class GeminiStreamDataSource(
         }
     }.flowOn(ioDispatcher)
 
-    private fun buildRequestJson(prompt: String, frameBitmap: Bitmap?): String {
+    private fun buildRequestJson(prompt: String, imageJpegBytes: ByteArray?): String {
         val partsArray = buildJsonArray {
-            if (frameBitmap != null) {
-                val base64Jpeg = encodeBitmapToBase64Jpeg(frameBitmap)
-                if (base64Jpeg != null) {
-                    add(
-                        buildJsonObject {
-                            put(
-                                "inline_data",
-                                buildJsonObject {
-                                    put("mime_type", "image/jpeg")
-                                    put("data", base64Jpeg)
-                                }
-                            )
-                        }
-                    )
-                }
+            if (imageJpegBytes != null && imageJpegBytes.isNotEmpty()) {
+                val base64Jpeg = Base64.getEncoder().encodeToString(imageJpegBytes)
+                add(
+                    buildJsonObject {
+                        put(
+                            "inline_data",
+                            buildJsonObject {
+                                put("mime_type", "image/jpeg")
+                                put("data", base64Jpeg)
+                            }
+                        )
+                    }
+                )
             }
             add(
                 buildJsonObject {
@@ -236,25 +232,6 @@ class GeminiStreamDataSource(
             }
         }
         sb.toString().takeIf { it.isNotEmpty() }
-    }.getOrNull()
-
-    private fun encodeBitmapToBase64Jpeg(bitmap: Bitmap): String? = runCatching {
-        val maxDim = 768
-        val scale = (maxDim.toFloat() / maxOf(bitmap.width, bitmap.height, 1)).coerceAtMost(1f)
-        val targetBitmap = if (scale < 1f) {
-            Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * scale).toInt().coerceAtLeast(1),
-                (bitmap.height * scale).toInt().coerceAtLeast(1),
-                true
-            )
-        } else {
-            bitmap
-        }
-        ByteArrayOutputStream().use { bos ->
-            targetBitmap.compress(Bitmap.CompressFormat.JPEG, 72, bos)
-            Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-        }
     }.getOrNull()
 
     companion object {
@@ -343,6 +320,13 @@ object DefensiveVerdictParser {
         coerceInputValues = true
     }
 
+    private val verdictRegex = Regex("VERDICT\\s*:\\s*\\*\\*?(SAFE|CAUTION|DANGER)\\*\\*?", RegexOption.IGNORE_CASE)
+    private val jsonSafetyRegex = Regex("\"safetyLevel\"\\s*:\\s*\"(SAFE|CAUTION|DANGER)\"", RegexOption.IGNORE_CASE)
+    private val summaryRegex = Regex("SUMMARY\\s*:\\s*(.*)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val leadingVerdictLineRegex = Regex("^\\s*VERDICT\\s*:.*\\r?\\n?", RegexOption.IGNORE_CASE)
+    private val flagsJsonStripRegex = Regex("FLAGS_JSON\\s*:.*", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val flagsJsonExtractRegex = Regex("FLAGS_JSON\\s*:\\s*(.*)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+
     data class ParsedLlmOutput(
         val safetyLevel: SafetyLevel?,
         val cleanSummary: String,
@@ -367,11 +351,9 @@ object DefensiveVerdictParser {
     }
 
     private fun extractSafetyLevel(raw: String): SafetyLevel? {
-        val verdictRegex = Regex("VERDICT\\s*:\\s*\\*\\*?(SAFE|CAUTION|DANGER)\\*\\*?", RegexOption.IGNORE_CASE)
         verdictRegex.find(raw)?.groupValues?.getOrNull(1)?.uppercase()?.let { matched ->
             return runCatching { SafetyLevel.valueOf(matched) }.getOrNull()
         }
-        val jsonSafetyRegex = Regex("\"safetyLevel\"\\s*:\\s*\"(SAFE|CAUTION|DANGER)\"", RegexOption.IGNORE_CASE)
         jsonSafetyRegex.find(raw)?.groupValues?.getOrNull(1)?.uppercase()?.let { matched ->
             return runCatching { SafetyLevel.valueOf(matched) }.getOrNull()
         }
@@ -385,12 +367,12 @@ object DefensiveVerdictParser {
     }
 
     private fun extractCleanSummary(raw: String): String {
-        val summaryMatch = Regex("SUMMARY\\s*:\\s*(.*)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(raw)
+        val summaryMatch = summaryRegex.find(raw)
         val afterSummaryMarker = summaryMatch?.groupValues?.getOrNull(1)
-            ?: raw.replaceFirst(Regex("^\\s*VERDICT\\s*:.*\\r?\\n?", RegexOption.IGNORE_CASE), "")
+            ?: raw.replaceFirst(leadingVerdictLineRegex, "")
 
         val beforeFlagsMarker = afterSummaryMarker
-            .replace(Regex("FLAGS_JSON\\s*:.*", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+            .replace(flagsJsonStripRegex, "")
             .substringBefore("```json")
             .substringBefore("[{")
 
@@ -401,7 +383,7 @@ object DefensiveVerdictParser {
     }
 
     private fun extractFlaggedIngredients(raw: String): List<FlaggedIngredient> {
-        val flagsMatch = Regex("FLAGS_JSON\\s*:\\s*(.*)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(raw)
+        val flagsMatch = flagsJsonExtractRegex.find(raw)
         val jsonSection = flagsMatch?.groupValues?.getOrNull(1) ?: raw
 
         val startBracket = jsonSection.indexOf('[')
